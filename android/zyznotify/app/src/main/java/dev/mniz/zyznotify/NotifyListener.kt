@@ -31,6 +31,10 @@ class NotifyListener : NotificationListenerService() {
             startForeground(STATUS_ID, notification)
         }
         prefs.lastStatus = "Listener connected"
+        try {
+            activeNotifications?.forEach { prefs.rememberPackage(it.packageName) }
+        } catch (_: Exception) {
+        }
     }
 
     override fun onListenerDisconnected() {
@@ -42,8 +46,9 @@ class NotifyListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         val note = sbn ?: return
-        if (!prefs.readyToSend()) return
         if (note.packageName == packageName) return
+        prefs.rememberPackage(note.packageName)
+        if (!prefs.readyToSend()) return
         if (!prefs.allows(note.packageName)) return
         if (note.isOngoing) return
         val notification = note.notification ?: return

@@ -38,6 +38,17 @@ class Prefs(context: Context) {
         get() = prefs.getString(KEY_STATUS, "").orEmpty()
         set(value) = prefs.edit().putString(KEY_STATUS, value).apply()
 
+    var knownPackages: Set<String>
+        get() = prefs.getStringSet(KEY_KNOWN, emptySet())?.toSet() ?: emptySet()
+        set(value) = prefs.edit().putStringSet(KEY_KNOWN, value).apply()
+
+    fun rememberPackage(packageName: String) {
+        val pkg = packageName.trim()
+        if (pkg.isEmpty()) return
+        val next = knownPackages + pkg
+        if (next.size != knownPackages.size) knownPackages = next
+    }
+
     fun allows(packageName: String): Boolean = packageName in allowedPackages
 
     fun togglePackage(packageName: String, enabled: Boolean) {
@@ -58,6 +69,7 @@ class Prefs(context: Context) {
         private const val KEY_TTL = "ttl"
         private const val KEY_ENABLED = "enabled"
         private const val KEY_ALLOWED = "allowed"
+        private const val KEY_KNOWN = "known"
         private const val KEY_STATUS = "status"
     }
 }

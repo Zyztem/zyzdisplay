@@ -68,19 +68,17 @@ fun HomeScreen(
     var search by remember { mutableStateOf("") }
     val listenerOn = remember(tick) { notificationAccessGranted(activity) }
     val batteryOk = remember(tick) { batteryUnrestricted(activity) }
-    val apps = remember(tick) { AppCatalog.installed(context.packageManager, context.packageName) }
+    val apps = remember(tick) {
+        AppCatalog.installed(
+            context.packageManager,
+            context.packageName,
+            prefs.knownPackages + prefs.allowedPackages,
+        )
+    }
     val installed = remember(apps) { apps.map { it.pkg }.toSet() }
     val needle = search.trim()
-    val suggested = remember(apps, needle) {
-        AppCatalog.suggested.filter { app ->
-            val present = app.packages.any { it in installed }
-            present && app.matches(needle)
-        }
-    }
-    val others = remember(apps, needle, allowed) {
-        apps.filter { app ->
-            app.pkg !in AppCatalog.catalogPackages && app.matches(needle)
-        }.sortedWith(
+    val visible = remember(apps, needle, allowed) {
+        apps.filter { it.matches(needle) }.sortedWith(
             compareByDescending<InstalledApp> { it.pkg in allowed }
                 .thenBy(String.CASE_INSENSITIVE_ORDER) { it.label },
         )
@@ -202,7 +200,7 @@ fun HomeScreen(
         item {
             Text("Apps", style = MaterialTheme.typography.titleLarge)
             Text(
-                "Every installed app is here. Only enabled ones are forwarded.",
+                "Every app on the phone. Search, then toggle what goes to the TV.",
                 color = MaterialTheme.colorScheme.secondary,
             )
             OutlinedTextField(
@@ -213,32 +211,13 @@ fun HomeScreen(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
         }
-        if (suggested.isNotEmpty()) {
-            item {
-                Text("Suggested", style = MaterialTheme.typography.titleMedium)
-            }
-            items(suggested, key = { "suggested:${it.label}" }) { app ->
-                val present = app.packages.filter { it in installed }
-                val on = present.any { it in allowed }
-                AppToggle(
-                    label = app.label,
-                    detail = present.joinToString(),
-                    checked = on,
-                    onCheckedChange = { checked ->
-                        val next = allowed.toMutableSet()
-                        if (checked) next += present else next -= app.packages.toSet()
-                        persistAllowed(next)
-                    },
-                )
-            }
-        }
         item {
             Text(
-                if (needle.isBlank()) "All apps (${others.size})" else "Matches (${others.size})",
+                if (needle.isBlank()) "All apps (${visible.size})" else "Matches (${visible.size})",
                 style = MaterialTheme.typography.titleMedium,
             )
         }
-        items(others, key = { it.pkg }) { app ->
+        items(visible, key = { it.pkg }) { app ->
             AppToggle(
                 label = app.label,
                 detail = app.pkg,
@@ -300,12 +279,6 @@ private fun AppToggle(
             Switch(checked = checked, onCheckedChange = onCheckedChange)
         }
     }
-}
-
-private fun SuggestedApp.matches(needle: String): Boolean {
-    if (needle.isBlank()) return true
-    return label.contains(needle, ignoreCase = true) ||
-        packages.any { it.contains(needle, ignoreCase = true) }
 }
 
 private fun InstalledApp.matches(needle: String): Boolean {

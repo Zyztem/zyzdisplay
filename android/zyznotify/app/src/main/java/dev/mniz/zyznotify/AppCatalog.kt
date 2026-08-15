@@ -70,25 +70,38 @@ object AppCatalog {
 
     val catalogPackages: Set<String> = suggested.flatMap { it.packages }.toSet()
 
-    fun installed(pm: PackageManager, selfPackage: String): List<InstalledApp> {
+    fun installed(
+        pm: PackageManager,
+        selfPackage: String,
+        extraPackages: Collection<String> = emptyList(),
+    ): List<InstalledApp> {
         val seen = LinkedHashMap<String, InstalledApp>()
 
         fun add(pkg: String, label: String? = null) {
             if (pkg.isBlank() || pkg == selfPackage || pkg in seen) return
-            val resolved = label ?: runCatching {
+            val resolved = label?.takeIf { it.isNotBlank() } ?: runCatching {
                 pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
             }.getOrNull().orEmpty().ifBlank { pkg }
             seen[pkg] = InstalledApp(label = resolved, pkg = pkg)
         }
 
+        installedPackages(pm).forEach { info ->
+            val appInfo = info.applicationInfo
+            val label = appInfo?.let { pm.getApplicationLabel(it).toString() }
+            add(info.packageName, label)
+        }
         installedApplications(pm).forEach { info ->
-            if (!info.enabled) return@forEach
             add(info.packageName, pm.getApplicationLabel(info).toString())
         }
 
         val launch = android.content.Intent(android.content.Intent.ACTION_MAIN)
             .addCategory(android.content.Intent.CATEGORY_LAUNCHER)
-        pm.queryIntentActivities(launch, 0).forEach { add(it.activityInfo.packageName) }
+        runCatching {
+            pm.queryIntentActivities(launch, PackageManager.MATCH_ALL)
+        }.getOrElse {
+            pm.queryIntentActivities(launch, 0)
+        }.forEach { add(it.activityInfo.packageName) }
+        extraPackages.forEach { add(it) }
         catalogPackages.forEach { pkg ->
             if (runCatching { pm.getApplicationInfo(pkg, 0) }.isSuccess) add(pkg, labelsByPackage[pkg])
         }
@@ -102,6 +115,15 @@ object AppCatalog {
         } else {
             @Suppress("DEPRECATION")
             pm.getInstalledApplications(0)
+        }
+    }
+
+    private fun installedPackages(pm: PackageManager): List<android.content.pm.PackageInfo> {
+        return if (Build.VERSION.SDK_INT >= 33) {
+            pm.getInstalledPackages(PackageManager.PackageInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION")
+            pm.getInstalledPackages(0)
         }
     }
 }
