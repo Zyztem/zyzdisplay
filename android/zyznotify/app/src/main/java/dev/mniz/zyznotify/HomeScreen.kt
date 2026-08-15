@@ -1,6 +1,5 @@
 package dev.mniz.zyznotify
 
-import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -13,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -65,9 +65,26 @@ fun HomeScreen(
     var ttl by remember(tick) { mutableIntStateOf(prefs.ttlSeconds) }
     var allowed by remember(tick) { mutableStateOf(prefs.allowedPackages) }
     var status by remember(tick) { mutableStateOf(prefs.lastStatus) }
+    var search by remember { mutableStateOf("") }
     val listenerOn = remember(tick) { notificationAccessGranted(activity) }
     val batteryOk = remember(tick) { batteryUnrestricted(activity) }
-    val installed = remember(tick) { installedPackages(context.packageManager) }
+    val apps = remember(tick) { AppCatalog.installed(context.packageManager, context.packageName) }
+    val installed = remember(apps) { apps.map { it.pkg }.toSet() }
+    val needle = search.trim()
+    val suggested = remember(apps, needle) {
+        AppCatalog.suggested.filter { app ->
+            val present = app.packages.any { it in installed }
+            present && app.matches(needle)
+        }
+    }
+    val others = remember(apps, needle, allowed) {
+        apps.filter { app ->
+            app.pkg !in AppCatalog.catalogPackages && app.matches(needle)
+        }.sortedWith(
+            compareByDescending<InstalledApp> { it.pkg in allowed }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.label },
+        )
+    }
 
     fun persistAllowed(next: Set<String>) {
         allowed = next
@@ -185,14 +202,23 @@ fun HomeScreen(
         item {
             Text("Apps", style = MaterialTheme.typography.titleLarge)
             Text(
-                "Only enabled apps are forwarded. Phone packages cover missed-call banners.",
+                "Every installed app is here. Only enabled ones are forwarded.",
                 color = MaterialTheme.colorScheme.secondary,
             )
+            OutlinedTextField(
+                value = search,
+                onValueChange = { search = it },
+                label = { Text("Search apps") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            )
         }
-        AppCatalog.suggested.forEach { app ->
-            val present = app.packages.filter { it in installed }
-            if (present.isEmpty()) return@forEach
-            item(key = app.label) {
+        if (suggested.isNotEmpty()) {
+            item {
+                Text("Suggested", style = MaterialTheme.typography.titleMedium)
+            }
+            items(suggested, key = { "suggested:${it.label}" }) { app ->
+                val present = app.packages.filter { it in installed }
                 val on = present.any { it in allowed }
                 AppToggle(
                     label = app.label,
@@ -206,30 +232,23 @@ fun HomeScreen(
                 )
             }
         }
-        val extras = installed
-            .filterNot { pkg -> AppCatalog.suggested.any { pkg in it.packages } }
-            .filterNot { it == context.packageName }
-            .sorted()
-        if (extras.isNotEmpty()) {
-            item { Text("Other installed apps", style = MaterialTheme.typography.titleMedium) }
-            extras.take(80).forEach { pkg ->
-                item(key = pkg) {
-                    val label = AppCatalog.labelsByPackage[pkg] ?: runCatching {
-                        val pm = context.packageManager
-                        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
-                    }.getOrDefault(pkg)
-                    AppToggle(
-                        label = label,
-                        detail = pkg,
-                        checked = pkg in allowed,
-                        onCheckedChange = { checked ->
-                            val next = allowed.toMutableSet()
-                            if (checked) next += pkg else next -= pkg
-                            persistAllowed(next)
-                        },
-                    )
-                }
-            }
+        item {
+            Text(
+                if (needle.isBlank()) "All apps (${others.size})" else "Matches (${others.size})",
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+        items(others, key = { it.pkg }) { app ->
+            AppToggle(
+                label = app.label,
+                detail = app.pkg,
+                checked = app.pkg in allowed,
+                onCheckedChange = { checked ->
+                    val next = allowed.toMutableSet()
+                    if (checked) next += app.pkg else next -= app.pkg
+                    persistAllowed(next)
+                },
+            )
         }
         item {
             TextButton(onClick = { persistAllowed(AppCatalog.defaultEnabled.intersect(installed)) }) {
@@ -283,15 +302,13 @@ private fun AppToggle(
     }
 }
 
-private fun installedPackages(pm: PackageManager): Set<String> {
-    val found = mutableSetOf<String>()
-    val launch = android.content.Intent(android.content.Intent.ACTION_MAIN)
-        .addCategory(android.content.Intent.CATEGORY_LAUNCHER)
-    pm.queryIntentActivities(launch, 0).forEach { found += it.activityInfo.packageName }
-    AppCatalog.suggested.forEach { app ->
-        app.packages.forEach { pkg ->
-            if (runCatching { pm.getApplicationInfo(pkg, 0) }.isSuccess) found += pkg
-        }
-    }
-    return found
+private fun SuggestedApp.matches(needle: String): Boolean {
+    if (needle.isBlank()) return true
+    return label.contains(needle, ignoreCase = true) ||
+        packages.any { it.contains(needle, ignoreCase = true) }
+}
+
+private fun InstalledApp.matches(needle: String): Boolean {
+    if (needle.isBlank()) return true
+    return label.contains(needle, ignoreCase = true) || pkg.contains(needle, ignoreCase = true)
 }
