@@ -4,18 +4,13 @@ Sideload this on the Samsung phone. It is the notification allowlist + ntfy publ
 
 ## Build
 
-On a machine with Android Studio (the display Pi cannot build this well):
+The display Pi cannot build this. Use GitHub Actions:
 
-1. Open `android/zyznotify`.
-2. Let Gradle sync.
-3. Build → Build APK(s), or `./gradlew assembleDebug` after Android Studio generates the wrapper jar.
-4. Copy `app/build/outputs/apk/debug/app-debug.apk` to the phone and sideload it.
+1. Push to `main`, or run **Actions → ZyzNotify APK → Run workflow**.
+2. Download the `zyznotify-debug` artifact.
+3. Sideload `app-debug.apk` on the phone.
 
-If the wrapper jar is missing:
-
-```bash
-gradle wrapper --gradle-version 8.9
-```
+On a machine with Android Studio: open `android/zyznotify`, then **Build → Build APK(s)**.
 
 ## First run on the phone
 
