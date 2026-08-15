@@ -1,0 +1,97 @@
+#!/bin/bash
+set -euo pipefail
+source /etc/zyzdisplay/zyzdisplay.env
+
+SINKCTL="$(command -v miracle-sinkctl || true)"
+SINKCTL="${SINKCTL:-/usr/local/bin/miracle-sinkctl}"
+DISPLAY_NAME="${DISPLAY_NAME:-$(hostname 2>/dev/null || true)}"
+DISPLAY_NAME="${DISPLAY_NAME:-ZyzDisplay}"
+
+if [[ ! -x "$SINKCTL" ]]; then
+    echo "miracle-sinkctl not found" >&2
+    exit 1
+fi
+
+miracle_link_path() {
+    local idx hex
+    idx="$(cat "/sys/class/net/${MIRACAST_IFACE}/ifindex" 2>/dev/null || true)"
+    [[ -n "$idx" ]] || return 1
+    printf -v hex '%02X' "'${idx:0:1}"
+    printf '/org/freedesktop/miracle/wifi/link/_%s%s\n' "$hex" "${idx:1}"
+}
+
+echo "Waiting for MiracleCast Wi-Fi daemon on ${MIRACAST_IFACE}..." >&2
+
+for _ in $(seq 1 45); do
+    if busctl --system status org.freedesktop.miracle.wifi >/dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
+
+if ! busctl --system status org.freedesktop.miracle.wifi >/dev/null 2>&1; then
+    echo "MiracleCast D-Bus name org.freedesktop.miracle.wifi did not appear" >&2
+    exit 1
+fi
+
+if [[ ! -r "/sys/class/net/${MIRACAST_IFACE}/ifindex" ]]; then
+    echo "Missing interface: ${MIRACAST_IFACE}" >&2
+    exit 1
+fi
+
+# sinkctl bind talks to wpa_supplicant through miracle-wifid.
+# Starting too early yields: "supplicant: invalid arguments (p2p_start_scan)".
+# MiracleCast keeps its control sockets under /run/miracle/wifi, not /run/wpa_supplicant.
+# P2P_FIND also needs the p2p-dev socket, which appears after the parent iface socket.
+CTRL_SOCK="/run/miracle/wifi/${MIRACAST_IFACE}"
+P2P_SOCK="/run/miracle/wifi/p2p-dev-${MIRACAST_IFACE}"
+for _ in $(seq 1 30); do
+    if [[ -S "$CTRL_SOCK" && -S "$P2P_SOCK" ]]; then
+        break
+    fi
+    sleep 1
+done
+
+if [[ ! -S "$CTRL_SOCK" ]]; then
+    echo "MiracleCast wpa_supplicant socket ${CTRL_SOCK} did not appear" >&2
+    exit 1
+fi
+if [[ ! -S "$P2P_SOCK" ]]; then
+    echo "MiracleCast P2P socket ${P2P_SOCK} did not appear" >&2
+    exit 1
+fi
+
+LINK_PATH=""
+for _ in $(seq 1 20); do
+    LINK_PATH="$(miracle_link_path || true)"
+    if [[ -n "$LINK_PATH" ]] && \
+       busctl --system get-property org.freedesktop.miracle.wifi \
+           "$LINK_PATH" org.freedesktop.miracle.wifi.Link Managed >/dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
+
+if [[ -n "$LINK_PATH" ]]; then
+    busctl --system set-property org.freedesktop.miracle.wifi \
+        "$LINK_PATH" org.freedesktop.miracle.wifi.Link FriendlyName s "$DISPLAY_NAME" \
+        >/dev/null 2>&1 || true
+fi
+
+# Give wpa_supplicant time to finish P2P setup (has_p2p) before bind's P2P_FIND.
+sleep 2
+
+echo "Starting miracle-sinkctl bind on ${MIRACAST_IFACE} as ${DISPLAY_NAME}" >&2
+
+# bind re-runs the sink if wpa_supplicant HUPs after a P2P group is torn down.
+# Line-buffer logs so "now running" / CONNECT show up in the journal.
+if command -v stdbuf >/dev/null 2>&1; then
+    exec stdbuf -oL -eL "$SINKCTL" \
+        --audio 1 \
+        --external-player /usr/local/libexec/zyz-miracle-player \
+        bind "${MIRACAST_IFACE}"
+fi
+exec "$SINKCTL" \
+    --audio 1 \
+    --external-player /usr/local/libexec/zyz-miracle-player \
+    bind "${MIRACAST_IFACE}"

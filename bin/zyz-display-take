@@ -1,0 +1,48 @@
+#!/bin/bash
+# Free HDMI DRM and ALSA for Miracast/AirPlay/video discs.
+# --audio  Release ALSA only (audio CD). Keep the kiosk on screen.
+set -uo pipefail
+source /etc/zyzdisplay/zyzdisplay.env
+
+AUDIO_ONLY=0
+if [[ "${1:-}" == "--audio" ]]; then
+    AUDIO_ONLY=1
+fi
+
+SPOTIFY_API="${SPOTIFY_STATUS_URL%/status}"
+SPOTIFY_API="${SPOTIFY_API:-http://127.0.0.1:3678}"
+
+for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+    printf 'performance\n' >"$g" 2>/dev/null || true
+done
+
+if curl -fsS -m 0.4 -X POST "${SPOTIFY_API}/player/pause" >/dev/null 2>&1; then
+    sleep 0.15
+fi
+
+systemctl stop --no-block go-librespot.service zyz-bluetooth.service >/dev/null 2>&1 || true
+if [[ "$AUDIO_ONLY" != "1" ]]; then
+    systemctl stop --no-block uxplay.service >/dev/null 2>&1 || true
+fi
+for _ in $(seq 1 10); do
+    if ! pgrep -x go-librespot >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.05
+done
+
+if [[ "$AUDIO_ONLY" == "1" ]]; then
+    exit 0
+fi
+
+if pgrep -x cog >/dev/null 2>&1 || pgrep -x WPEWebProcess >/dev/null 2>&1; then
+    systemctl kill -s KILL zyzdisplay-kiosk.service >/dev/null 2>&1 || true
+    for _ in $(seq 1 8); do
+        if ! pgrep -x cog >/dev/null 2>&1 && ! pgrep -x WPEWebProcess >/dev/null 2>&1; then
+            break
+        fi
+        sleep 0.05
+    done
+fi
+systemctl stop --no-block zyzdisplay-kiosk.service >/dev/null 2>&1 || true
+systemctl reset-failed zyzdisplay-kiosk.service >/dev/null 2>&1 || true

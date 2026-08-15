@@ -1,0 +1,60 @@
+#!/bin/bash
+set -euo pipefail
+
+source /etc/zyzdisplay/zyzdisplay.env
+
+URL="http://127.0.0.1:8080/"
+VIDEO_MODE="${DRM_MODE%%@*}"
+VIDEO_MODE="${VIDEO_MODE:-1920x1080}"
+if [[ "$DRM_MODE" == *"@"* ]]; then
+    MAX_REFRESH="${DRM_MODE##*@}"
+else
+    MAX_REFRESH=30
+fi
+MAX_REFRESH="${MAX_REFRESH:-30}"
+
+hdmi_has_refresh_at_most() {
+    local want="$1" max_hz="$2"
+    modetest -c 2>/dev/null | awk -v id="${DRM_CONNECTOR_ID:-}" -v want="$want" -v maxhz="$max_hz" '
+        $1 == id && $3 == "connected" { in_conn = 1; next }
+        in_conn && $1 ~ /^[0-9]+$/ && $3 ~ /^(connected|disconnected)$/ { exit }
+        in_conn && $2 == want && ($3 + 0) <= (maxhz + 0.01) { found = 1; exit }
+        END { exit !found }
+    '
+}
+
+export COG_PLATFORM_DRM_VIDEO_MODE="$VIDEO_MODE"
+if hdmi_has_refresh_at_most "$VIDEO_MODE" "$MAX_REFRESH"; then
+    export COG_PLATFORM_DRM_MODE_MAX="${VIDEO_MODE}@${MAX_REFRESH}"
+else
+    unset COG_PLATFORM_DRM_MODE_MAX || true
+fi
+
+for _ in $(seq 1 60); do
+    if curl -fsS "$URL" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.2
+done
+
+exec /usr/bin/cog --platform=drm --bg-color=black \
+    --webprocess-failure=restart \
+    --web-mem-limit=128 \
+    --web-check-interval=20 \
+    --net-mem-limit=24 \
+    --net-check-interval=30 \
+    --enable-2d-canvas-acceleration=false \
+    --enable-webgl=false \
+    --enable-media=false \
+    --enable-webaudio=false \
+    --enable-media-stream=false \
+    --enable-mediasource=false \
+    --enable-webrtc=false \
+    --enable-encrypted-media=false \
+    --enable-smooth-scrolling=false \
+    --enable-page-cache=false \
+    --enable-html5-database=false \
+    --enable-html5-local-storage=false \
+    --enable-offline-web-application-cache=false \
+    --enable-dns-prefetching=false \
+    "$URL"

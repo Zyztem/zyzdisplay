@@ -1,0 +1,52 @@
+#!/bin/bash
+set -u
+
+source /etc/zyzdisplay/zyzdisplay.env 2>/dev/null || true
+MIRACAST_IFACE="${MIRACAST_IFACE:-wlan0}"
+
+printf '%-30s %s\n' "dashboard backend" "$(systemctl is-active zyzdisplay-dashboard.service 2>/dev/null || true)"
+printf '%-30s %s\n' "DRM kiosk" "$(systemctl is-active zyzdisplay-kiosk.service 2>/dev/null || true)"
+printf '%-30s %s\n' "go-librespot" "$(systemctl is-active go-librespot.service 2>/dev/null || true)"
+printf '%-30s %s\n' "uxplay" "$(systemctl is-active uxplay.service 2>/dev/null || true)"
+printf '%-30s %s\n' "bluetooth a2dp" "$(systemctl is-active zyz-bluetooth.service 2>/dev/null || true)"
+printf '%-30s %s\n' "avahi-daemon" "$(systemctl is-active avahi-daemon.service 2>/dev/null || true)"
+printf '%-30s %s\n' "miracle-wifid" "$(systemctl is-active miracle-wifid.service 2>/dev/null || true)"
+printf '%-30s %s\n' "miracle-sink" "$(systemctl is-active miracle-sink.service 2>/dev/null || true)"
+printf '%-30s %s\n' "miracle-watch" "$(systemctl is-active miracle-watch.service 2>/dev/null || true)"
+if [[ -e /dev/sr0 ]]; then
+    printf '%-30s %s\n' "optical drive" "present"
+else
+    printf '%-30s %s\n' "optical drive" "missing"
+fi
+if systemctl is-active --quiet zyz-disc.service 2>/dev/null; then
+    printf '%-30s %s\n' "disc player" "active"
+else
+    printf '%-30s %s\n' "disc player" "idle"
+fi
+
+idx="$(cat "/sys/class/net/${MIRACAST_IFACE}/ifindex" 2>/dev/null || true)"
+if [[ -n "$idx" ]]; then
+    printf -v hex '%02X' "'${idx:0:1}"
+    link="/org/freedesktop/miracle/wifi/link/_${hex}${idx:1}"
+    name="$(busctl --system get-property org.freedesktop.miracle.wifi "$link" org.freedesktop.miracle.wifi.Link FriendlyName 2>/dev/null | awk '{print $2}' | tr -d '"' || true)"
+    scan="$(busctl --system get-property org.freedesktop.miracle.wifi "$link" org.freedesktop.miracle.wifi.Link P2PScanning 2>/dev/null | awk '{print $2}' || true)"
+    printf '%-30s %s\n' "miracast name" "${name:-unknown}"
+    printf '%-30s %s\n' "p2p scanning" "${scan:-unknown}"
+fi
+if iw dev 2>/dev/null | grep -q 'type P2P-device'; then
+    printf '%-30s %s\n' "p2p device" "present"
+else
+    printf '%-30s %s\n' "p2p device" "missing"
+fi
+if pgrep -x gst-launch-1.0 >/dev/null 2>&1; then
+    printf '%-30s %s\n' "miracast session" "casting"
+elif iw dev 2>/dev/null | grep -qE 'type P2P-(GO|client)'; then
+    printf '%-30s %s\n' "miracast session" "p2p-group"
+else
+    printf '%-30s %s\n' "miracast session" "idle"
+fi
+printf '\n'
+
+if command -v curl >/dev/null 2>&1; then
+    curl -fsS http://127.0.0.1:8080/api/health 2>/dev/null | python3 -m json.tool || true
+fi

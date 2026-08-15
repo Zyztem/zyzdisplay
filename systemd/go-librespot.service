@@ -1,0 +1,20 @@
+[Unit]
+StartLimitIntervalSec=0
+Description=ZyzDisplay Spotify Connect
+Wants=network-online.target avahi-daemon.service
+After=network-online.target sound.target avahi-daemon.service
+
+[Service]
+Type=simple
+User=zyztem
+SupplementaryGroups=audio
+Environment=HOME=/home/zyztem
+Environment=XDG_CONFIG_HOME=/home/zyztem/.config
+ExecStart=/usr/local/bin/go-librespot --config_dir /home/zyztem/.config/go-librespot
+Restart=always
+RestartSec=3
+TimeoutStopSec=2
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target

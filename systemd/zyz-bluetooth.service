@@ -1,0 +1,18 @@
+[Unit]
+StartLimitIntervalSec=0
+Description=ZyzDisplay Bluetooth A2DP sink
+After=bluetooth.service bluealsa.service bluealsa-aplay.service sound.target
+Wants=bluetooth.service bluealsa.service bluealsa-aplay.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/zyzdisplay/zyzdisplay.env
+ExecStart=/usr/local/libexec/zyz-bluetooth
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=5
+KillSignal=SIGKILL
+
+[Install]
+WantedBy=multi-user.target

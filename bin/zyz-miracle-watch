@@ -1,0 +1,187 @@
+#!/bin/bash
+set -euo pipefail
+source /etc/zyzdisplay/zyzdisplay.env
+
+DISPLAY_NAME="${DISPLAY_NAME:-$(hostname 2>/dev/null || true)}"
+DISPLAY_NAME="${DISPLAY_NAME:-ZyzDisplay}"
+STATE=/run/miracle/wpas.watch
+install -d -m 0755 /run/miracle
+
+miracle_link_path() {
+    local idx hex
+    idx="$(cat "/sys/class/net/${MIRACAST_IFACE}/ifindex" 2>/dev/null || true)"
+    [[ -n "$idx" ]] || return 1
+    printf -v hex '%02X' "'${idx:0:1}"
+    printf '/org/freedesktop/miracle/wifi/link/_%s%s\n' "$hex" "${idx:1}"
+}
+
+wpas_pid() {
+    pgrep -n -f "wpa_supplicant -c /run/miracle/wifi" || true
+}
+
+casting() {
+    # Do not pgrep zyz-miracle-player: miracle-sinkctl's argv contains
+    # --external-player /usr/local/libexec/zyz-miracle-player.
+    pgrep -x gst-launch-1.0 >/dev/null 2>&1
+}
+
+p2p_group_ifaces() {
+    iw dev 2>/dev/null | awk '/Interface p2p-/ {print $2}'
+}
+
+p2p_group_station_count() {
+    local iface n count=0
+    for iface in $(p2p_group_ifaces); do
+        n="$(iw dev "$iface" station dump 2>/dev/null | grep -c '^Station ' || true)"
+        count=$((count + ${n:-0}))
+    done
+    printf '%s\n' "$count"
+}
+
+p2p_device_present() {
+    iw dev 2>/dev/null | grep -q 'type P2P-device'
+}
+
+link_get() {
+    local prop="$1"
+    local path
+    path="$(miracle_link_path 2>/dev/null || true)"
+    [[ -n "$path" ]] || return 1
+    busctl --system get-property org.freedesktop.miracle.wifi \
+        "$path" org.freedesktop.miracle.wifi.Link "$prop" 2>/dev/null
+}
+
+link_set() {
+    local prop="$1" sig="$2" value="$3"
+    local path
+    path="$(miracle_link_path 2>/dev/null || true)"
+    [[ -n "$path" ]] || return 1
+    busctl --system set-property org.freedesktop.miracle.wifi \
+        "$path" org.freedesktop.miracle.wifi.Link "$prop" "$sig" "$value" >/dev/null 2>&1
+}
+
+ensure_name() {
+    local current
+    current="$(link_get FriendlyName 2>/dev/null | awk '{print $2}' | tr -d '"' || true)"
+    if [[ "$current" != "$DISPLAY_NAME" ]]; then
+        echo "Setting MiracleCast name to ${DISPLAY_NAME}" >&2
+        link_set FriendlyName s "$DISPLAY_NAME" || true
+    fi
+}
+
+ensure_scan() {
+    # MiracleCast's P2P_FIND is unreliable; re-issue it on an interval while idle.
+    link_set P2PScanning b true || true
+}
+
+remove_stale_groups() {
+    local iface
+    for iface in $(p2p_group_ifaces); do
+        echo "Removing stale P2P group ${iface}" >&2
+        wpa_cli -p /run/miracle/wifi -i "p2p-dev-${MIRACAST_IFACE}" \
+            p2p_group_remove "$iface" >/dev/null 2>&1 || true
+        ip link delete "$iface" >/dev/null 2>&1 || true
+    done
+}
+
+restore_idle_display() {
+    systemctl reset-failed zyzdisplay-kiosk.service >/dev/null 2>&1 || true
+    systemctl start --no-block zyzdisplay-kiosk.service uxplay.service zyz-bluetooth.service go-librespot.service >/dev/null 2>&1 || true
+}
+
+echo "MiracleCast watchdog on ${MIRACAST_IFACE} as ${DISPLAY_NAME}" >&2
+
+p2p_miss=0
+stale_group=0
+took_drm=0
+idle_ticks=0
+last_wpa=""
+
+while true; do
+    if ! systemctl is-active --quiet miracle-wifid.service; then
+        sleep 5
+        continue
+    fi
+
+    if casting; then
+        p2p_miss=0
+        stale_group=0
+        took_drm=1
+        idle_ticks=0
+        cur="$(wpas_pid)"
+        [[ -n "$cur" ]] && printf '%s\n' "$cur" > "$STATE"
+        sleep 2
+        continue
+    fi
+
+    groups="$(p2p_group_ifaces || true)"
+    if [[ -n "$groups" ]]; then
+        stations="$(p2p_group_station_count)"
+        if [[ "${stations:-0}" -gt 0 ]]; then
+            stale_group=0
+        else
+            stale_group=$((stale_group + 1))
+            if [[ "$stale_group" -ge 60 ]]; then
+                echo "Removing empty P2P group: ${groups}" >&2
+                remove_stale_groups
+                if [[ "$took_drm" == "1" ]]; then
+                    restore_idle_display
+                fi
+                stale_group=0
+                took_drm=0
+                sleep 2
+                ensure_scan
+            fi
+        fi
+        sleep 0.2
+        continue
+    fi
+    stale_group=0
+    took_drm=0
+
+    if ! p2p_device_present; then
+        p2p_miss=$((p2p_miss + 1))
+        if [[ "$p2p_miss" -ge 6 ]]; then
+            echo "P2P device missing; restarting miracle-wifid" >&2
+            systemctl restart miracle-wifid.service >/dev/null 2>&1 || true
+            sleep 4
+            systemctl restart miracle-sink.service >/dev/null 2>&1 || true
+            rm -f "$STATE"
+            p2p_miss=0
+            sleep 12
+            continue
+        fi
+        sleep 2
+        continue
+    fi
+    p2p_miss=0
+
+    if grep -q '^p2p_go_intent=0' /run/miracle/wifi/*.conf 2>/dev/null; then
+        echo "wpa_supplicant still using go-intent 0; restarting miracle-wifid as GO" >&2
+        systemctl restart miracle-wifid.service >/dev/null 2>&1 || true
+        sleep 4
+        systemctl restart miracle-sink.service >/dev/null 2>&1 || true
+        rm -f "$STATE"
+        sleep 12
+        continue
+    fi
+
+    idle_ticks=$((idle_ticks + 1))
+    if [[ "$idle_ticks" -ge 6 ]]; then
+        idle_ticks=0
+        ensure_name
+        ensure_scan
+        cur="$(wpas_pid)"
+        last="$(cat "$STATE" 2>/dev/null || true)"
+        if [[ -n "$cur" && -n "$last" && "$cur" != "$last" ]]; then
+            echo "wpa_supplicant relaunched (${last} -> ${cur}); rebinding sink" >&2
+            systemctl restart miracle-sink.service >/dev/null 2>&1 || true
+            sleep 8
+        fi
+        if [[ -n "$cur" ]]; then
+            printf '%s\n' "$cur" > "$STATE"
+        fi
+    fi
+
+    sleep 2
+done

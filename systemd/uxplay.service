@@ -1,0 +1,21 @@
+[Unit]
+StartLimitIntervalSec=0
+Description=ZyzDisplay AirPlay receiver (UxPlay)
+Documentation=https://github.com/FDH2/UxPlay
+Wants=avahi-daemon.service network-online.target
+After=avahi-daemon.service network-online.target sound.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/zyzdisplay/zyzdisplay.env
+ExecStart=/usr/local/libexec/zyz-uxplay
+Restart=always
+RestartSec=3
+SuccessExitStatus=143 15
+KillMode=mixed
+TimeoutStopSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

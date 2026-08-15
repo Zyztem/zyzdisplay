@@ -1,0 +1,15 @@
+# UxPlay startup file for ZyzDisplay.
+# Command-line options in zyz-uxplay override these.
+n ZyzDisplay
+nh
+p
+v4l2
+bt709
+vc v4l2convert
+s 1920x1080@30
+fps 30
+vsync no
+al 0.1
+nohold
+nofreeze
+reset 2

@@ -1,0 +1,22 @@
+[Unit]
+StartLimitIntervalSec=0
+Description=ZyzDisplay MiracleCast sink (miracle-sinkctl)
+Documentation=man:miracle-sinkctl
+Requires=miracle-wifid.service
+After=dbus.service miracle-wifid.service
+BindsTo=miracle-wifid.service
+Wants=dbus.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/zyzdisplay/zyzdisplay.env
+ExecStart=/usr/local/libexec/zyz-miracle-sink
+Restart=always
+RestartSec=3
+KillMode=mixed
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

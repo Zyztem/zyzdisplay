@@ -1,0 +1,20 @@
+[Unit]
+StartLimitIntervalSec=0
+Description=ZyzDisplay MiracleCast Wi-Fi Direct daemon (miracle-wifid)
+Documentation=man:miracle-wifid
+After=dbus.service NetworkManager.service systemd-hostnamed.service
+Wants=dbus.service NetworkManager.service systemd-hostnamed.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/zyzdisplay/zyzdisplay.env
+ExecStartPre=/bin/sh -c '/usr/bin/nmcli device set "$MIRACAST_IFACE" managed no >/dev/null 2>&1 || true'
+ExecStart=/usr/local/libexec/zyz-miracle-wifid
+Restart=always
+RestartSec=3
+KillMode=mixed
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

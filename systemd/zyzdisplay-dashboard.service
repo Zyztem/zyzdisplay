@@ -1,0 +1,27 @@
+[Unit]
+StartLimitIntervalSec=0
+Description=ZyzDisplay dashboard backend
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/zyzdisplay/zyzdisplay.env
+Environment=ZYZ_WEB_ROOT=/opt/zyzdisplay/web
+Environment=ZYZ_STATE_DIR=/var/lib/zyzdisplay
+ExecStart=/usr/bin/python3 /opt/zyzdisplay/backend/zyzdisplay_server.py
+Restart=always
+RestartSec=2
+DynamicUser=yes
+StateDirectory=zyzdisplay
+PrivateTmp=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

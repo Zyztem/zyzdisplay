@@ -1,0 +1,131 @@
+#!/bin/bash
+set -uo pipefail
+source /etc/zyzdisplay/zyzdisplay.env
+
+DEBUG=0
+AUDIO=0
+SCALE=0
+PORT=7236
+WIDTH=""
+HEIGHT=""
+
+while getopts "r:d:as:p:h" opt; do
+    case "$opt" in
+        d) DEBUG="${OPTARG// /}" ;;
+        a) AUDIO=1 ;;
+        p) PORT="${OPTARG// /}" ;;
+        s)
+            SCALE=1
+            WIDTH="$(printf '%s' "$OPTARG" | cut -dx -f1)"
+            HEIGHT="$(printf '%s' "$OPTARG" | cut -dx -f2)"
+            ;;
+        r) : ;;
+        h)
+            echo "zyz-miracle-player [-a] [-d level] [-p port] [-s WxH] [-r WxH]"
+            exit 0
+            ;;
+        *) exit 2 ;;
+    esac
+done
+
+GST_PID=""
+CPUFREQ_GOV="$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || true)"
+
+set_cpufreq() {
+    local gov="$1"
+    [[ -n "$gov" ]] || return 0
+    for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+        printf '%s\n' "$gov" >"$g" 2>/dev/null || true
+    done
+}
+
+stop_pipeline() {
+    if [[ -n "${GST_PID}" ]]; then
+        kill -KILL "$GST_PID" >/dev/null 2>&1 || true
+        wait "$GST_PID" >/dev/null 2>&1 || true
+        GST_PID=""
+    fi
+    pkill -KILL -f "/usr/bin/gst-launch-1.0 .*port=${PORT}" >/dev/null 2>&1 || true
+}
+
+restore_idle() {
+    set_cpufreq "${CPUFREQ_GOV:-ondemand}"
+    systemctl reset-failed zyzdisplay-kiosk.service >/dev/null 2>&1 || true
+    systemctl start zyzdisplay-kiosk.service >/dev/null 2>&1 || true
+    systemctl start --no-block uxplay.service zyz-bluetooth.service go-librespot.service >/dev/null 2>&1 || true
+}
+
+cleanup() {
+    trap - EXIT INT TERM
+    stop_pipeline
+    restore_idle
+}
+trap cleanup EXIT INT TERM
+
+# Always take HDMI/ALSA here. Early watchdog take used to kill Spotify
+# during P2P setup, which aborted both the music session and Smart View.
+# Stop the disc player first so its restore does not fight gst for DRM.
+systemctl stop --no-block zyz-disc.service >/dev/null 2>&1 || true
+/usr/local/libexec/zyz-display-take >/dev/null 2>&1 || true
+
+CMD=(/usr/bin/gst-launch-1.0 -q --no-fault)
+if [[ "$DEBUG" != "0" ]]; then
+    CMD=(/usr/bin/gst-launch-1.0 -v --no-fault "--gst-debug=${DEBUG}")
+fi
+
+CMD+=(
+    udpsrc "port=${PORT}" buffer-size=2097152 'caps=application/x-rtp, media=video'
+    '!' rtpjitterbuffer latency=80
+    '!' rtpmp2tdepay
+    '!' tsdemux
+)
+
+if [[ "$AUDIO" == "1" ]]; then
+    CMD+=(name=demuxer demuxer.)
+fi
+
+CMD+=(
+    '!' queue max-size-buffers=0 max-size-time=0 leaky=downstream
+    '!' h264parse
+    '!' v4l2h264dec
+    '!' videoconvert n-threads=2
+)
+
+if [[ "$SCALE" == "1" ]]; then
+    CMD+=(
+        '!' videoscale method=1
+        '!' "video/x-raw,width=${WIDTH},height=${HEIGHT}"
+    )
+fi
+
+CMD+=(
+    # Miracast carries shared audio/video timestamps. Keep both sinks on the
+    # pipeline clock, but do not let kmssink's 5 ms default lateness threshold
+    # discard every frame after hardware decode.
+    '!' kmssink "connector-id=${DRM_CONNECTOR_ID}" force-modesetting=true sync=true max-lateness=-1 processing-deadline=0 qos=false
+)
+
+if [[ "$AUDIO" == "1" ]]; then
+    CMD+=(
+        demuxer.
+        '!' queue max-size-buffers=0 max-size-time=0 leaky=downstream
+        '!' aacparse
+        '!' avdec_aac
+        '!' audioconvert
+        '!' audioresample
+        '!' alsasink "device=${AUDIO_DEVICE}" sync=true processing-deadline=0 buffer-time=60000 latency-time=20000
+    )
+fi
+
+printf 'running:'
+printf ' %q' "${CMD[@]}"
+printf '\n'
+
+if [[ "${ZYZ_PLAYER_DRYRUN:-0}" == "1" ]]; then
+    exit 0
+fi
+
+"${CMD[@]}" &
+GST_PID=$!
+wait "$GST_PID" || true
+GST_PID=""

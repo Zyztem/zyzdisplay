@@ -1,0 +1,22 @@
+[Unit]
+StartLimitIntervalSec=0
+Description=ZyzDisplay DRM kiosk
+Requires=zyzdisplay-dashboard.service
+After=zyzdisplay-dashboard.service
+
+[Service]
+Type=simple
+User=zyztem
+SupplementaryGroups=video render input
+EnvironmentFile=/etc/zyzdisplay/zyzdisplay.env
+ExecStart=/usr/local/libexec/zyz-kiosk
+Restart=always
+RestartSec=2
+KillSignal=SIGKILL
+KillMode=control-group
+TimeoutStopSec=1
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

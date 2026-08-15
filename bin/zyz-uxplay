@@ -1,0 +1,182 @@
+#!/bin/bash
+set -euo pipefail
+source /etc/zyzdisplay/zyzdisplay.env
+
+UXPLAY="$(command -v uxplay || true)"
+UXPLAY="${UXPLAY:-/usr/bin/uxplay}"
+ZYZ_HOME="$(getent passwd "${ZYZ_USER}" | cut -d: -f6)"
+ZYZ_HOME="${ZYZ_HOME:-/home/${ZYZ_USER}}"
+RELEASE_HOLD_SEC=8
+
+if [[ ! -x "$UXPLAY" ]]; then
+    echo "uxplay not found" >&2
+    exit 1
+fi
+
+CURRENT_CONNECTORS="$(modetest -c 2>/dev/null || true)"
+if ! printf '%s\n' "$CURRENT_CONNECTORS" | awk -v id="$DRM_CONNECTOR_ID" '$1 == id && $3 == "connected" && $4 ~ /^HDMI-A/ {ok=1} END {exit !ok}'; then
+    DETECTED_CONNECTOR="$(printf '%s\n' "$CURRENT_CONNECTORS" | awk '$3 == "connected" && $4 ~ /^HDMI-A/ {print $1; exit}')"
+    if [[ -n "$DETECTED_CONNECTOR" ]]; then
+        DRM_CONNECTOR_ID="$DETECTED_CONNECTOR"
+    fi
+fi
+
+HOLDING=0
+KIOSK_WAS_ACTIVE=0
+SPOTIFY_WAS_ACTIVE=0
+BT_WAS_ACTIVE=0
+CPUFREQ_GOV=""
+RELEASE_AFTER=0
+UX_PID=""
+
+set_cpufreq() {
+    local gov="$1"
+    [[ -n "$gov" ]] || return 0
+    for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+        printf '%s\n' "$gov" >"$g" 2>/dev/null || true
+    done
+}
+
+wait_kiosk_gone() {
+    local _
+    for _ in $(seq 1 8); do
+        if ! pgrep -x cog >/dev/null 2>&1 && ! pgrep -x WPEWebProcess >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 0.05
+    done
+}
+
+wifi_performance() {
+    iw dev "${NETWORK_IFACE}" set power_save off >/dev/null 2>&1 || true
+}
+
+take_display() {
+    RELEASE_AFTER=0
+    if [[ "$HOLDING" == "1" ]]; then
+        return
+    fi
+    HOLDING=1
+    KIOSK_WAS_ACTIVE=1
+    SPOTIFY_WAS_ACTIVE=1
+    BT_WAS_ACTIVE=1
+    CPUFREQ_GOV="$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || true)"
+    wifi_performance
+    systemctl stop --no-block zyz-disc.service go-librespot.service zyz-bluetooth.service >/dev/null 2>&1 || true
+    if pgrep -x cog >/dev/null 2>&1 || pgrep -x WPEWebProcess >/dev/null 2>&1; then
+        systemctl kill -s KILL zyzdisplay-kiosk.service >/dev/null 2>&1 || true
+        wait_kiosk_gone
+    fi
+    systemctl stop --no-block zyzdisplay-kiosk.service >/dev/null 2>&1 || true
+    systemctl reset-failed zyzdisplay-kiosk.service >/dev/null 2>&1 || true
+    set_cpufreq performance
+}
+
+schedule_release() {
+    if [[ "$HOLDING" != "1" ]]; then
+        return
+    fi
+    RELEASE_AFTER=$((SECONDS + RELEASE_HOLD_SEC))
+}
+
+maybe_release() {
+    if [[ "$HOLDING" != "1" || "$RELEASE_AFTER" -eq 0 ]]; then
+        return
+    fi
+    if (( SECONDS >= RELEASE_AFTER )); then
+        RELEASE_AFTER=0
+        release_display
+    fi
+}
+
+release_display() {
+    RELEASE_AFTER=0
+    if [[ "$HOLDING" != "1" ]]; then
+        return
+    fi
+    if pgrep -f '/usr/local/libexec/zyz-miracle-player' >/dev/null 2>&1; then
+        HOLDING=0
+        return
+    fi
+    HOLDING=0
+    set_cpufreq "${CPUFREQ_GOV:-ondemand}"
+    CPUFREQ_GOV=""
+    systemctl reset-failed zyzdisplay-kiosk.service >/dev/null 2>&1 || true
+    if [[ "$KIOSK_WAS_ACTIVE" == "1" ]]; then
+        systemctl start zyzdisplay-kiosk.service >/dev/null 2>&1 || true
+    fi
+    if [[ "$SPOTIFY_WAS_ACTIVE" == "1" ]]; then
+        systemctl start --no-block go-librespot.service >/dev/null 2>&1 || true
+    fi
+    if [[ "$BT_WAS_ACTIVE" == "1" ]]; then
+        systemctl start --no-block zyz-bluetooth.service >/dev/null 2>&1 || true
+    fi
+}
+
+cleanup() {
+    RELEASE_AFTER=0
+    release_display
+    if [[ -n "${UX_PID}" ]]; then
+        kill "$UX_PID" >/dev/null 2>&1 || true
+        wait "$UX_PID" >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
+echo "Starting UxPlay as ${ZYZ_USER} on HDMI connector ${DRM_CONNECTOR_ID}, ALSA ${AUDIO_DEVICE}" >&2
+wifi_performance
+
+exec 3< <(
+    stdbuf -oL -eL runuser -u "$ZYZ_USER" -- env \
+        HOME="$ZYZ_HOME" \
+        XDG_CONFIG_HOME="${ZYZ_HOME}/.config" \
+        UXPLAYRC=/etc/zyzdisplay/uxplayrc \
+        "$UXPLAY" \
+        -n ZyzDisplay \
+        -nh \
+        -p \
+        -v4l2 \
+        -bt709 \
+        -vc v4l2convert \
+        -s 1920x1080@30 \
+        -fps 30 \
+        -vsync no \
+        -al 0.1 \
+        -nohold \
+        -nofreeze \
+        -reset 2 \
+        -vs "kmssink connector-id=${DRM_CONNECTOR_ID} force-modesetting=true sync=false skip-vsync=true processing-deadline=0 qos=true" \
+        -as "alsasink device=${AUDIO_DEVICE} sync=false processing-deadline=0 buffer-time=60000 latency-time=20000"
+)
+UX_PID=$!
+
+while true; do
+    status=0
+    if read -t 1 -r line <&3; then
+        printf '%s\n' "$line"
+        case "$line" in
+            *"Accepted IPv4 client"*|*"connection request from"*)
+                take_display
+                ;;
+            *"GStreamer error"*)
+                # Keep DRM. The Mac retries; giving Cog the display back here
+                # is what made the first AirPlay attempt fail forever.
+                RELEASE_AFTER=0
+                ;;
+            *"lost connection with client"*|*"GStreamer: End-Of-Stream"*|*"Removing connection"*|*"Connection closed"*|*"raop_rtp_mirror->running is no longer true"*)
+                schedule_release
+                ;;
+        esac
+    else
+        status=$?
+        if [[ "$status" -le 128 ]]; then
+            break
+        fi
+        maybe_release
+        if ! kill -0 "$UX_PID" >/dev/null 2>&1; then
+            break
+        fi
+    fi
+done
+
+wait "$UX_PID" >/dev/null 2>&1 || true

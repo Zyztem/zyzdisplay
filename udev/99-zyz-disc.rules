@@ -1,0 +1,3 @@
+# USB or SATA optical drive: start playback when a disc is inserted.
+ACTION=="add", SUBSYSTEM=="block", KERNEL=="sr*", RUN+="/bin/systemctl --no-block start zyz-disc.service"
+ACTION=="change", SUBSYSTEM=="block", KERNEL=="sr*", ENV{DISK_MEDIA_CHANGE}=="1", RUN+="/bin/systemctl --no-block restart zyz-disc.service"

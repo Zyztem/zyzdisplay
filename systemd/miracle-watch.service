@@ -1,0 +1,15 @@
+[Unit]
+StartLimitIntervalSec=0
+Description=ZyzDisplay MiracleCast watchdog
+After=miracle-wifid.service miracle-sink.service
+Wants=miracle-wifid.service miracle-sink.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/zyzdisplay/zyzdisplay.env
+ExecStart=/usr/local/libexec/zyz-miracle-watch
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

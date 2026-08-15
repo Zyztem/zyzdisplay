@@ -1,0 +1,308 @@
+#!/bin/bash
+set -euo pipefail
+source /etc/zyzdisplay/zyzdisplay.env
+
+AUDIO_DEVICE="${AUDIO_DEVICE:-plughw:1,0}"
+USB_VID="0b05"
+USB_PID="190e"
+MAC=""
+HCI=""
+AGENT_PID=""
+AGENT_FD=""
+SPOTIFY_WAS_ACTIVE=0
+HOLDING_ALSA=0
+
+log() { echo "$*" >&2; }
+
+usb_bt_sysfs() {
+    local d v p
+    for d in /sys/bus/usb/devices/*; do
+        v="$(cat "$d/idVendor" 2>/dev/null || true)"
+        p="$(cat "$d/idProduct" 2>/dev/null || true)"
+        if [[ "$v" == "$USB_VID" && "$p" == "$USB_PID" ]]; then
+            printf '%s\n' "$d"
+            return 0
+        fi
+    done
+    return 1
+}
+
+keep_usb_awake() {
+    local d
+    d="$(usb_bt_sysfs || true)"
+    [[ -n "$d" ]] || return 1
+    echo on > "$d/power/control" 2>/dev/null || true
+    echo -1 > "$d/power/autosuspend" 2>/dev/null || true
+    echo -1 > "$d/power/autosuspend_delay_ms" 2>/dev/null || true
+    printf '%s\n' "$d"
+}
+
+reset_usb_bt() {
+    local d
+    d="$(keep_usb_awake || true)"
+    [[ -n "$d" ]] || return 1
+    log "resetting USB Bluetooth ${d}"
+    echo 0 > "$d/authorized" 2>/dev/null || true
+    sleep 2
+    echo 1 > "$d/authorized" 2>/dev/null || true
+    sleep 4
+    keep_usb_awake >/dev/null || true
+}
+
+read_usb_adapter() {
+    hciconfig 2>/dev/null | awk '
+        /^hci[0-9]+:/ { name=$1; sub(":", "", name); bus=""; mac="" }
+        /Bus: USB/ { bus="usb" }
+        /BD Address:/ { mac=$3 }
+        bus=="usb" && mac != "" && mac != "00:00:00:00:00:00" {
+            print name, mac
+            exit
+        }
+    '
+}
+
+power_off_uart() {
+    # Onboard UART Bluetooth shares the MiracleCast combo chip. Leave it
+    # powered; zyz-bluetooth only uses the USB dongle.
+    return 0
+}
+
+bt() {
+    {
+        echo "select ${MAC}"
+        printf '%s\n' "$@"
+        echo "quit"
+    } | bluetoothctl >/dev/null 2>&1 || true
+}
+
+wait_usb_adapter() {
+    local i info
+    keep_usb_awake >/dev/null || true
+    for i in $(seq 1 45); do
+        info="$(read_usb_adapter || true)"
+        if [[ -n "$info" ]]; then
+            HCI="${info%% *}"
+            MAC="${info##* }"
+            return 0
+        fi
+        if (( i == 10 || i == 22 || i == 34 )); then
+            reset_usb_bt || true
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+configure_adapter() {
+    bt "power on" \
+       "pairable on" \
+       "discoverable-timeout 0" \
+       "discoverable on" \
+       "system-alias ZyzDisplay"
+    hciconfig "$HCI" class 0x240414 >/dev/null 2>&1 || true
+}
+
+bt_out() {
+    {
+        echo "select ${MAC}"
+        printf '%s\n' "$@"
+        echo "quit"
+    } | bluetoothctl 2>/dev/null || true
+}
+
+trust_paired() {
+    local dev
+    bt_out "devices Paired" | awk '/^Device / { print $2 }' | while read -r dev; do
+        [[ -n "$dev" ]] || continue
+        bt "trust ${dev}"
+    done
+}
+
+bluealsa_on_usb() {
+    if busctl --timeout=2 tree org.bluealsa 2>/dev/null | grep -q "/org/bluez/${HCI}/A2DP"; then
+        return 0
+    fi
+    return 1
+}
+
+ensure_bluealsa() {
+    systemctl start bluealsa.service bluealsa-aplay.service >/dev/null 2>&1 || true
+    if bluealsa_on_usb; then
+        return 0
+    fi
+    log "restarting BlueALSA onto ${HCI}"
+    systemctl restart bluealsa.service >/dev/null 2>&1 || true
+    sleep 1
+    systemctl restart bluealsa-aplay.service >/dev/null 2>&1 || true
+}
+
+take_alsa() {
+    if [[ "$HOLDING_ALSA" == "1" ]]; then
+        return
+    fi
+    HOLDING_ALSA=1
+    SPOTIFY_WAS_ACTIVE=0
+    if systemctl is-active --quiet go-librespot.service; then
+        SPOTIFY_WAS_ACTIVE=1
+        systemctl stop go-librespot.service >/dev/null 2>&1 || true
+    fi
+}
+
+release_alsa() {
+    if [[ "$HOLDING_ALSA" != "1" ]]; then
+        return
+    fi
+    HOLDING_ALSA=0
+    if [[ "$SPOTIFY_WAS_ACTIVE" == "1" ]]; then
+        systemctl start go-librespot.service >/dev/null 2>&1 || true
+    fi
+    SPOTIFY_WAS_ACTIVE=0
+}
+
+start_agent() {
+    if [[ -n "$AGENT_PID" ]]; then
+        kill "$AGENT_PID" >/dev/null 2>&1 || true
+        AGENT_PID=""
+    fi
+    if [[ -n "${AGENT_FD:-}" ]]; then
+        exec {AGENT_FD}>&- || true
+        AGENT_FD=""
+    fi
+    coproc BTAGENT { exec stdbuf -oL bluetoothctl --agent auto; }
+    AGENT_PID="${BTAGENT_PID:-}"
+    sleep 1
+    if [[ -n "${BTAGENT[1]:-}" ]]; then
+        exec {AGENT_FD}>&"${BTAGENT[1]}"
+        {
+            echo "select ${MAC}"
+            echo "default-agent"
+            echo "discoverable-timeout 0"
+            echo "discoverable on"
+            echo "pairable on"
+            echo "advertise on"
+        } >&"${AGENT_FD}" || true
+    fi
+}
+
+forget_onboard_bonds() {
+    local uart_mac dev
+    uart_mac="$(hciconfig 2>/dev/null | awk '
+        /^hci[0-9]+:/ { bus="" }
+        /Bus: UART/ { bus="uart" }
+        /BD Address:/ && bus=="uart" { print $3; exit }
+    ')"
+    [[ -n "$uart_mac" ]] || return 0
+    {
+        echo "select ${uart_mac}"
+        echo "devices Paired"
+        echo "quit"
+    } | bluetoothctl 2>/dev/null | awk '/^Device / { print $2 }' | while read -r dev; do
+        [[ -n "$dev" ]] || continue
+        {
+            echo "select ${uart_mac}"
+            echo "remove ${dev}"
+            echo "quit"
+        } | bluetoothctl >/dev/null 2>&1 || true
+    done
+}
+
+write_bt_status() {
+    mkdir -p /run/zyzdisplay
+    local name
+    name="$(connected_bt_name)"
+    if [[ -n "$name" ]]; then
+        python3 -c 'import json,sys; json.dump({"connected": True, "name": sys.argv[1]}, sys.stdout)' "$name" \
+            > /run/zyzdisplay/bluetooth.json.tmp
+    else
+        printf '%s\n' '{"connected":false,"name":""}' > /run/zyzdisplay/bluetooth.json.tmp
+    fi
+    mv /run/zyzdisplay/bluetooth.json.tmp /run/zyzdisplay/bluetooth.json
+}
+
+connected_bt_name() {
+    bt_out "devices Connected" | awk '
+        /^Device / {
+            $1 = ""; $2 = "";
+            sub(/^ +/, "");
+            print
+            exit
+        }
+    '
+}
+
+cleanup() {
+    release_alsa
+    mkdir -p /run/zyzdisplay
+    printf '%s\n' '{"connected":false,"name":""}' > /run/zyzdisplay/bluetooth.json
+    if [[ -n "${AGENT_FD:-}" ]]; then
+        exec {AGENT_FD}>&- || true
+    fi
+    if [[ -n "$AGENT_PID" ]]; then
+        kill "$AGENT_PID" >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
+rfkill unblock bluetooth >/dev/null 2>&1 || true
+keep_usb_awake >/dev/null || true
+power_off_uart
+
+if ! wait_usb_adapter; then
+    log "USB Bluetooth adapter failed to come up"
+    exit 1
+fi
+
+power_off_uart
+forget_onboard_bonds
+configure_adapter
+trust_paired
+start_agent
+ensure_bluealsa
+log "Bluetooth A2DP sink on ${HCI} (${MAC}) -> ${AUDIO_DEVICE}"
+write_bt_status
+
+IDLE_TICKS=0
+while true; do
+    keep_usb_awake >/dev/null || true
+    info="$(read_usb_adapter || true)"
+    if [[ -z "$info" ]]; then
+        if bt_out "devices Connected" | grep -q '^Device '; then
+            write_bt_status
+            sleep 5
+            continue
+        fi
+        release_alsa
+        log "USB Bluetooth dropped; recovering"
+        reset_usb_bt || true
+        if wait_usb_adapter; then
+            configure_adapter
+            trust_paired
+            start_agent
+            ensure_bluealsa
+            log "Bluetooth A2DP sink recovered on ${HCI} (${MAC})"
+        fi
+    else
+        HCI="${info%% *}"
+        MAC="${info##* }"
+        if bt_out "devices Connected" | grep -q '^Device '; then
+            take_alsa
+            trust_paired
+            IDLE_TICKS=0
+        else
+            release_alsa
+            IDLE_TICKS=$((IDLE_TICKS + 1))
+            if (( IDLE_TICKS % 20 == 0 )); then
+                power_off_uart
+                if [[ -n "${AGENT_FD:-}" ]]; then
+                    echo "discoverable on" >&"${AGENT_FD}" || true
+                    echo "advertise on" >&"${AGENT_FD}" || true
+                fi
+            fi
+        fi
+        if ! bluealsa_on_usb; then
+            ensure_bluealsa
+        fi
+    fi
+    write_bt_status
+    sleep 5
+done

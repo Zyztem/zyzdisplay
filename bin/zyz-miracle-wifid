@@ -1,0 +1,24 @@
+#!/bin/bash
+set -euo pipefail
+source /etc/zyzdisplay/zyzdisplay.env
+
+WIFID="$(command -v miracle-wifid || true)"
+WIFID="${WIFID:-/usr/local/bin/miracle-wifid}"
+
+if [[ ! -x "$WIFID" ]]; then
+    echo "miracle-wifid not found" >&2
+    exit 1
+fi
+
+# Clean only MiracleCast-owned runtime state for this dedicated interface.
+install -d -m 0755 /run/miracle/wifi /run/wpa_supplicant
+rm -rf /run/miracle/wifi/*
+rm -f "/run/wpa_supplicant/${MIRACAST_IFACE}"
+
+# go-intent 15 makes the Pi the P2P group owner so the phone joins us.
+# The Pi 3 radio is 2.4 GHz only; being client of a phone GO is the flaky path.
+exec "$WIFID" \
+    --interface "${MIRACAST_IFACE}" \
+    --go-intent 15 \
+    --log-level info \
+    --wpa-syslog
