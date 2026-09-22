@@ -1,0 +1,13 @@
+[Unit]
+StartLimitIntervalSec=0
+Description=ZyzDisplay keyboard escape hatch (Ctrl+Alt+Esc drops the kiosk to a text console)
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/zyz-kiosk-escape
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

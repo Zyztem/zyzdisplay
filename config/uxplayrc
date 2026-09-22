@@ -1,5 +1,6 @@
 # UxPlay startup file for ZyzDisplay.
-# Command-line options in zyz-uxplay override these.
+# Command-line options in zyz-uxplay override these, including v4l2/vc which
+# it picks per-board (hardware decode on Pi 3/4, software decode on Pi 5).
 n ZyzDisplay
 nh
 p

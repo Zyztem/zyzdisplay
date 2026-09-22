@@ -68,6 +68,13 @@ trap cleanup EXIT INT TERM
 systemctl stop --no-block zyz-disc.service >/dev/null 2>&1 || true
 /usr/local/libexec/zyz-display-take >/dev/null 2>&1 || true
 
+H264_DECODER="${H264_DECODER:-v4l2h264dec}"
+if [[ "$H264_DECODER" != "v4l2h264dec" ]]; then
+    # Software decode (no bcm2835-codec block, e.g. Raspberry Pi 5) needs the
+    # CPU at full speed to keep up with 1080p30 H.264 reliably.
+    set_cpufreq performance
+fi
+
 CMD=(/usr/bin/gst-launch-1.0 -q --no-fault)
 if [[ "$DEBUG" != "0" ]]; then
     CMD=(/usr/bin/gst-launch-1.0 -v --no-fault "--gst-debug=${DEBUG}")
@@ -87,7 +94,7 @@ fi
 CMD+=(
     '!' queue max-size-buffers=0 max-size-time=0 leaky=downstream
     '!' h264parse
-    '!' v4l2h264dec
+    '!' "$H264_DECODER"
     '!' videoconvert n-threads=2
 )
 

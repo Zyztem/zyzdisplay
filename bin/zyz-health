@@ -6,6 +6,8 @@ MIRACAST_IFACE="${MIRACAST_IFACE:-wlan0}"
 
 printf '%-30s %s\n' "dashboard backend" "$(systemctl is-active zyzdisplay-dashboard.service 2>/dev/null || true)"
 printf '%-30s %s\n' "DRM kiosk" "$(systemctl is-active zyzdisplay-kiosk.service 2>/dev/null || true)"
+printf '%-30s %s\n' "kiosk escape hatch" "$(systemctl is-active zyz-kiosk-escape.service 2>/dev/null || true)"
+printf '%-30s %s\n' "H.264 decode" "${H264_DECODER:-unknown} / ${H264_CONVERTER:-unknown}"
 printf '%-30s %s\n' "go-librespot" "$(systemctl is-active go-librespot.service 2>/dev/null || true)"
 printf '%-30s %s\n' "uxplay" "$(systemctl is-active uxplay.service 2>/dev/null || true)"
 printf '%-30s %s\n' "bluetooth a2dp" "$(systemctl is-active zyz-bluetooth.service 2>/dev/null || true)"

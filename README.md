@@ -1,16 +1,53 @@
 # ZyzDisplay Production Stack
 
-A Raspberry Pi OS Lite appliance stack for the hardware proven in this setup:
+A Raspberry Pi OS Lite appliance stack, proven on:
 
 - Raspberry Pi 3
+- Raspberry Pi 5
+
+Common hardware:
+
 - onboard `wlan0` dedicated to Miracast
-- TP-Link Archer on `wlan1` for normal Wi-Fi
+- USB Wi-Fi adapter for normal Wi-Fi (TP-Link Archer on the tested Pi 3 unit)
 - HDMI-A-1 at 1920x1080 (30Hz when the display offers it)
-- HDMI audio through ALSA (`plughw:1,0` on the tested unit)
+- HDMI audio through ALSA, matched to whichever HDMI port is actually driving
+  the display (`plughw:1,0` on the Pi 3 unit; Pi 5 has two HDMI ports/cards)
 - MiracleCast
 - UxPlay (AirPlay)
 - go-librespot
 - Cog/WPE rendering directly to DRM/KMS
+
+## Raspberry Pi 5 notes
+
+Pi 5 (BCM2712) dropped the `bcm2835-codec` V4L2 M2M block that Pi 3/4 use for
+hardware H.264 decode; its only hardware video decoder is HEVC-only
+(`rpi-hevc-dec`), which Miracast and AirPlay don't use. The installer detects
+this at install time (`v4l2-ctl --list-devices`) and records the right
+GStreamer decoder/converter in `/etc/zyzdisplay/zyzdisplay.env`:
+
+```text
+H264_DECODER=avdec_h264      # v4l2h264dec on Pi 3/4
+H264_CONVERTER=videoconvert  # v4l2convert on Pi 3/4
+```
+
+Software H.264 decode runs on the CPU; `zyz-miracle-player` and `zyz-uxplay`
+switch the CPU governor to `performance` while a software-decoded stream is
+active and restore it afterward. Pi 5's four Cortex-A76 cores handle 1080p30
+H.264 comfortably this way.
+
+## Exiting to a terminal
+
+The kiosk owns DRM/KMS directly with no window manager, so there's normally no
+keyboard path back to a console. `zyz-kiosk-escape.service` runs independently
+of Cog and the dashboard (so it still works if either is hung) and watches for
+**Ctrl+Alt+Esc**: it stops `zyzdisplay-kiosk.service` and prints a message to
+the physical console. Resume the display with:
+
+```bash
+sudo systemctl start zyzdisplay-kiosk
+```
+
+or reboot.
 
 ## Production behavior
 
@@ -185,7 +222,8 @@ after disconnect.
 
 UxPlay is installed from Debian (`uxplay`) and advertised over Avahi on
 `wlan1` as **ZyzDisplay**. It uses the same HDMI `kmssink` + ALSA path as
-Miracast, with Broadcom `v4l2h264dec` and `-bt709`.
+Miracast, using whichever H.264 decode path the installer detected (see
+[Raspberry Pi 5 notes](#raspberry-pi-5-notes)) and `-bt709`.
 
 Avahi is shared with go-librespot (`zeroconf_backend: avahi`) so Spotify
 Connect and AirPlay do not fight over mDNS port 5353. Avahi is restricted to
@@ -222,6 +260,7 @@ Service status:
 systemctl status \
   zyzdisplay-dashboard \
   zyzdisplay-kiosk \
+  zyz-kiosk-escape \
   go-librespot \
   uxplay \
   miracle-wifid \

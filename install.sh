@@ -18,7 +18,8 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
     apt-get install -y \
-    cog curl iw network-manager alsa-utils libdrm-tests python3 python3-yaml \
+    cog curl iw network-manager alsa-utils libdrm-tests v4l-utils \
+    python3 python3-yaml python3-evdev \
     python3-icalendar python3-dateutil \
     gstreamer1.0-tools gstreamer1.0-alsa \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
@@ -26,17 +27,33 @@ apt-get update
     avahi-daemon uxplay bluez bluez-alsa-utils bluez-tools \
     mpv cd-discid libcdio-utils libdvdnav4 libdvdread8
 
-for cmd in miracle-wifid miracle-sinkctl go-librespot cog gst-launch-1.0 uxplay v4l2h264dec; do
-    if [[ "$cmd" == "v4l2h264dec" ]]; then
-        if ! gst-inspect-1.0 v4l2h264dec >/dev/null 2>&1; then
-            echo "ERROR: GStreamer v4l2h264dec is unavailable. Hardware H.264 decode is required." >&2
-            exit 1
-        fi
-    elif ! command -v "$cmd" >/dev/null 2>&1; then
+for cmd in miracle-wifid miracle-sinkctl go-librespot cog gst-launch-1.0 uxplay; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "ERROR: required command not found: $cmd" >&2
         exit 1
     fi
 done
+
+# Raspberry Pi 5 (BCM2712) dropped the bcm2835-codec V4L2 M2M block that
+# provides hardware H.264 decode/convert on Pi 3/4; it only has hardware HEVC
+# decode (rpi-hevc-dec), which Miracast/AirPlay do not use. Detect what is
+# actually present instead of assuming hardware decode is available.
+HAVE_HW_H264=0
+if v4l2-ctl --list-devices 2>/dev/null | grep -qi 'bcm2835-codec'; then
+    HAVE_HW_H264=1
+fi
+if [[ "$HAVE_HW_H264" -eq 1 ]]; then
+    H264_DECODER=v4l2h264dec
+    H264_CONVERTER=v4l2convert
+else
+    H264_DECODER=avdec_h264
+    H264_CONVERTER=videoconvert
+    echo "No bcm2835-codec V4L2 decoder found (expected on Raspberry Pi 5); using software H.264 decode (avdec_h264)."
+fi
+if ! gst-inspect-1.0 "$H264_DECODER" >/dev/null 2>&1; then
+    echo "ERROR: GStreamer element $H264_DECODER is unavailable." >&2
+    exit 1
+fi
 
 MIRACLE_WIFID="$(command -v miracle-wifid)"
 MIRACLE_SINKCTL="$(command -v miracle-sinkctl)"
@@ -57,6 +74,7 @@ install -m 0755 "$SCRIPT_DIR/bin/zyz-miracle-watch" /usr/local/libexec/zyz-mirac
 install -m 0755 "$SCRIPT_DIR/bin/zyz-uxplay" /usr/local/libexec/zyz-uxplay
 install -m 0755 "$SCRIPT_DIR/bin/zyz-bluetooth" /usr/local/libexec/zyz-bluetooth
 install -m 0755 "$SCRIPT_DIR/bin/zyz-disc" /usr/local/libexec/zyz-disc
+install -m 0755 "$SCRIPT_DIR/bin/zyz-kiosk-escape" /usr/local/libexec/zyz-kiosk-escape
 install -m 0755 "$SCRIPT_DIR/bin/zyz-health" /usr/local/bin/zyz-health
 
 usermod -aG video,render,audio "$ZYZ_USER" >/dev/null 2>&1 || true
@@ -65,19 +83,85 @@ install -d -m 0755 /etc/zyzdisplay
 install -m 0644 "$SCRIPT_DIR/config/uxplayrc" /etc/zyzdisplay/uxplayrc
 ENV_FILE=/etc/zyzdisplay/zyzdisplay.env
 
-NETWORK_IFACE="${NETWORK_IFACE:-wlan1}"
-MIRACAST_IFACE="${MIRACAST_IFACE:-wlan0}"
+existing_env_value() {
+    local key="$1"
+    [[ -f "$ENV_FILE" ]] || return 0
+    awk -v k="$key" 'index($0, k "=") == 1 {sub("^" k "=", ""); print}' "$ENV_FILE" | tail -n1
+}
+
+wifi_interfaces() {
+    iw dev 2>/dev/null | awk '$1 == "Interface" {print $2}'
+}
+
+is_usb_wifi() {
+    local iface="$1" device_path
+    device_path="$(readlink -f "/sys/class/net/${iface}/device" 2>/dev/null || true)"
+    [[ "$device_path" == */usb* ]]
+}
+
+if [[ -z "${NETWORK_IFACE:-}" ]]; then
+    NETWORK_IFACE="$(existing_env_value NETWORK_IFACE)"
+fi
+if [[ -z "${MIRACAST_IFACE:-}" ]]; then
+    MIRACAST_IFACE="$(existing_env_value MIRACAST_IFACE)"
+fi
+
+mapfile -t WIFI_IFACES < <(wifi_interfaces)
+if [[ -z "${NETWORK_IFACE:-}" ]]; then
+    for iface in "${WIFI_IFACES[@]}"; do
+        if is_usb_wifi "$iface"; then
+            NETWORK_IFACE="$iface"
+            break
+        fi
+    done
+fi
+if [[ -z "${NETWORK_IFACE:-}" && -d /sys/class/net/wlan1 ]]; then
+    NETWORK_IFACE=wlan1
+fi
+if [[ -z "${MIRACAST_IFACE:-}" && -d /sys/class/net/wlan0 ]]; then
+    MIRACAST_IFACE=wlan0
+fi
+if [[ -z "${MIRACAST_IFACE:-}" ]]; then
+    for iface in "${WIFI_IFACES[@]}"; do
+        if [[ "$iface" != "$NETWORK_IFACE" ]] && ! is_usb_wifi "$iface"; then
+            MIRACAST_IFACE="$iface"
+            break
+        fi
+    done
+fi
+if [[ -z "${NETWORK_IFACE:-}" || -z "${MIRACAST_IFACE:-}" || "$NETWORK_IFACE" == "$MIRACAST_IFACE" ]]; then
+    echo "ERROR: could not identify separate USB network and onboard MiracleCast Wi-Fi interfaces." >&2
+    echo "       Set NETWORK_IFACE and MIRACAST_IFACE explicitly and rerun." >&2
+    exit 1
+fi
+if [[ ! -d "/sys/class/net/${NETWORK_IFACE}" || ! -d "/sys/class/net/${MIRACAST_IFACE}" ]]; then
+    echo "ERROR: Wi-Fi interface is not present: network=${NETWORK_IFACE}, miracast=${MIRACAST_IFACE}" >&2
+    exit 1
+fi
+
 DRM_MODE="${DRM_MODE:-1920x1080@30}"
 
 DRM_CONNECTOR_ID="${DRM_CONNECTOR_ID:-}"
+DRM_CONNECTOR_NAME=""
 if [[ -z "$DRM_CONNECTOR_ID" ]]; then
-    DRM_CONNECTOR_ID="$(modetest -c 2>/dev/null | awk '$3 == "connected" && $4 ~ /^HDMI-A/ {print $1; exit}')"
+    read -r DRM_CONNECTOR_ID DRM_CONNECTOR_NAME < <(modetest -c 2>/dev/null | awk '$3 == "connected" && $4 ~ /^HDMI-A/ {print $1, $4; exit}') || true
 fi
 DRM_CONNECTOR_ID="${DRM_CONNECTOR_ID:-35}"
 
+# Raspberry Pi 5 has two HDMI ports (HDMI-A-1 / HDMI-A-2), each with its own
+# ALSA card (vc4-hdmi-0 / vc4-hdmi-1). HDMI audio only comes out of the port
+# actually driving the display, so match the ALSA card to the connector
+# picked above instead of just grabbing the first HDMI card found.
 AUDIO_DEVICE="${AUDIO_DEVICE:-}"
 if [[ -z "$AUDIO_DEVICE" ]]; then
-    AUDIO_PAIR="$(aplay -l 2>/dev/null | sed -nE '/^card [0-9]+:.*(HDMI|vc4hdmi|vc4-hdmi)/ s/^card ([0-9]+):.*device ([0-9]+):.*/\1,\2/p' | head -n1)"
+    AUDIO_PAIR=""
+    if [[ "$DRM_CONNECTOR_NAME" =~ ^HDMI-A-([0-9]+)$ ]]; then
+        HDMI_PORT_INDEX=$(( BASH_REMATCH[1] - 1 ))
+        AUDIO_PAIR="$(aplay -l 2>/dev/null | sed -nE "/^card [0-9]+:.*vc4-?hdmi-?${HDMI_PORT_INDEX}\\b/ s/^card ([0-9]+):.*device ([0-9]+):.*/\\1,\\2/p" | head -n1)"
+    fi
+    if [[ -z "$AUDIO_PAIR" ]]; then
+        AUDIO_PAIR="$(aplay -l 2>/dev/null | sed -nE '/^card [0-9]+:.*(HDMI|vc4hdmi|vc4-hdmi)/ s/^card ([0-9]+):.*device ([0-9]+):.*/\1,\2/p' | head -n1)"
+    fi
     AUDIO_DEVICE="plughw:${AUDIO_PAIR:-1,0}"
 fi
 
@@ -118,6 +202,8 @@ DISPLAY_NAME=ZyzDisplay
 DRM_CONNECTOR_ID=${DRM_CONNECTOR_ID}
 DRM_MODE=${DRM_MODE}
 AUDIO_DEVICE=${AUDIO_DEVICE}
+H264_DECODER=${H264_DECODER}
+H264_CONVERTER=${H264_CONVERTER}
 SPOTIFY_STATUS_URL=http://127.0.0.1:3678/status
 WALLHAVEN_ENABLED=1
 WALLHAVEN_INTERVAL=300
@@ -150,7 +236,6 @@ unmanaged-devices=interface-name:${MIRACAST_IFACE},interface-name:p2p-dev-${MIRA
 EOF_NM
 install -m 0644 "$SCRIPT_DIR/networkmanager/99-zyzdisplay-wifi-powersave.conf" \
     /etc/NetworkManager/conf.d/99-zyzdisplay-wifi-powersave.conf
-nmcli device set "$MIRACAST_IFACE" managed no >/dev/null 2>&1 || true
 iw dev "$NETWORK_IFACE" set power_save off >/dev/null 2>&1 || true
 
 # Merge production-required go-librespot settings while preserving credentials
@@ -220,7 +305,7 @@ backup_unit() {
     fi
 }
 
-for unit in zyzdisplay-dashboard.service zyzdisplay-kiosk.service go-librespot.service miracle-wifid.service miracle-sink.service miracle-watch.service uxplay.service zyz-bluetooth.service; do
+for unit in zyzdisplay-dashboard.service zyzdisplay-kiosk.service go-librespot.service miracle-wifid.service miracle-sink.service miracle-watch.service uxplay.service zyz-bluetooth.service zyz-kiosk-escape.service; do
     backup_unit "/etc/systemd/system/$unit"
 done
 
@@ -234,6 +319,7 @@ install -m 0644 "$SCRIPT_DIR/systemd/miracle-watch.service" /etc/systemd/system/
 install -m 0644 "$SCRIPT_DIR/systemd/uxplay.service" /etc/systemd/system/uxplay.service
 install -m 0644 "$SCRIPT_DIR/systemd/zyz-bluetooth.service" /etc/systemd/system/zyz-bluetooth.service
 install -m 0644 "$SCRIPT_DIR/systemd/zyz-disc.service" /etc/systemd/system/zyz-disc.service
+install -m 0644 "$SCRIPT_DIR/systemd/zyz-kiosk-escape.service" /etc/systemd/system/zyz-kiosk-escape.service
 install -d -m 0755 /etc/systemd/system/bluealsa.service.d /etc/systemd/system/bluealsa-aplay.service.d
 install -m 0644 "$SCRIPT_DIR/systemd/bluealsa.service.d/zyz.conf" /etc/systemd/system/bluealsa.service.d/zyz.conf
 cat > /etc/systemd/system/bluealsa-aplay.service.d/zyz.conf <<EOF_BT
@@ -322,18 +408,34 @@ path.write_text("\n".join(out) + "\n", encoding="utf-8")
 PY
 fi
 
+SERVICES_STOPPED=0
+restore_services_on_failure() {
+    local status=$?
+    if [[ "$status" -ne 0 && "$SERVICES_STOPPED" -eq 1 ]]; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        systemctl start zyzdisplay-dashboard.service go-librespot.service uxplay.service \
+            zyz-bluetooth.service miracle-wifid.service miracle-sink.service \
+            miracle-watch.service zyzdisplay-kiosk.service zyz-kiosk-escape.service >/dev/null 2>&1 || true
+    fi
+    exit "$status"
+}
+trap restore_services_on_failure EXIT
+
 # Clear prototype/manual processes before systemd becomes the sole owner.
 systemctl stop zyzdisplay-kiosk.service uxplay.service miracle-watch.service miracle-sink.service miracle-wifid.service go-librespot.service zyzdisplay-dashboard.service zyz-bluetooth.service 2>/dev/null || true
+SERVICES_STOPPED=1
 pkill -f '[m]iracle-sinkctl' 2>/dev/null || true
 pkill -f '[m]iracle-wifid' 2>/dev/null || true
 pkill -x uxplay 2>/dev/null || true
 fuser -k 8080/tcp >/dev/null 2>&1 || true
 
 systemctl daemon-reload
-systemctl enable bluetooth.service avahi-daemon.service zyzdisplay-dashboard.service zyzdisplay-kiosk.service go-librespot.service uxplay.service zyz-bluetooth.service miracle-wifid.service miracle-sink.service miracle-watch.service
+systemctl enable bluetooth.service avahi-daemon.service zyzdisplay-dashboard.service zyzdisplay-kiosk.service go-librespot.service uxplay.service zyz-bluetooth.service miracle-wifid.service miracle-sink.service miracle-watch.service zyz-kiosk-escape.service
 systemctl restart avahi-daemon.service >/dev/null 2>&1 || systemctl start avahi-daemon.service
 systemctl start bluetooth.service >/dev/null 2>&1 || true
 systemctl start zyzdisplay-dashboard.service go-librespot.service uxplay.service zyz-bluetooth.service miracle-wifid.service miracle-sink.service miracle-watch.service zyzdisplay-kiosk.service
+systemctl restart zyz-kiosk-escape.service >/dev/null 2>&1 || systemctl start zyz-kiosk-escape.service
+SERVICES_STOPPED=0
 
 sleep 2
 
@@ -346,6 +448,8 @@ echo "  HDMI DRM:   connector $DRM_CONNECTOR_ID, mode $DRM_MODE"
 echo "  HDMI audio: $AUDIO_DEVICE"
 echo "  AirPlay:    UxPlay on $NETWORK_IFACE"
 echo "  Bluetooth:  A2DP sink ZyzDisplay"
+echo "  H.264:      $H264_DECODER decode, $H264_CONVERTER convert"
+echo "  Escape:     Ctrl+Alt+Esc on the keyboard stops the kiosk for terminal access"
 echo
 /usr/local/bin/zyz-health || true
 
@@ -359,4 +463,4 @@ else
 fi
 
 echo
-echo "Reboot recommended so NetworkManager picks up the persistent wlan0 unmanaged policy cleanly."
+echo "Reboot recommended so NetworkManager picks up the persistent ${MIRACAST_IFACE} unmanaged policy cleanly."
