@@ -35,6 +35,30 @@ switch the CPU governor to `performance` while a software-decoded stream is
 active and restore it afterward. Pi 5's four Cortex-A76 cores handle 1080p30
 H.264 comfortably this way.
 
+### USB Wi-Fi dongle note (Realtek RTL8852BU / rtw89_8852bu)
+
+The USB adapter used for `NETWORK_IFACE` on the bring-up unit is a Realtek
+RTL8852BU (`rtw89_8852bu` driver). Its mainline Linux support is quite new and
+has a scanning bug: a plain passive scan finds nearby APs fine, but a
+*directed* active scan (`iw dev <if> scan ssid "<ssid>"`, which is what
+wpa_supplicant issues) returns nothing. Against a WPA2/WPA3-transition AP,
+NetworkManager needs that directed scan to pull the full RSN info required to
+negotiate SAE, so every connection attempt fails with "the Wi-Fi network
+could not be found" even though the network is clearly visible.
+
+Workaround: force the connection profile to plain WPA2-PSK, which only needs
+the info already present in a passive scan:
+
+```bash
+sudo nmcli connection add type wifi ifname wlan1 con-name "wlan1-<ssid>" \
+  ssid "<ssid>" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "<password>"
+```
+
+If this dongle is swapped for another unit, or a fresh Pi 5 is being
+provisioned, check for this symptom first before assuming a bad config: a
+raw `sudo iw dev <if> scan` finds the SSID, but `nmcli connection up` fails
+with `ssid-not-found`.
+
 ## Exiting to a terminal
 
 The kiosk owns DRM/KMS directly with no window manager, so there's normally no
