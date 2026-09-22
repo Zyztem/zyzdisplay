@@ -2,13 +2,18 @@
 StartLimitIntervalSec=0
 Description=ZyzDisplay DRM kiosk
 Requires=zyzdisplay-dashboard.service
-After=zyzdisplay-dashboard.service
+After=zyzdisplay-dashboard.service seatd.service
+Wants=seatd.service
 
 [Service]
 Type=simple
 User=zyztem
 SupplementaryGroups=video render input
 EnvironmentFile=/etc/zyzdisplay/zyzdisplay.env
+Environment=XDG_RUNTIME_DIR=/run/zyzdisplay-kiosk
+Environment=LIBSEAT_BACKEND=seatd
+RuntimeDirectory=zyzdisplay-kiosk
+RuntimeDirectoryMode=0700
 ExecStart=/usr/local/libexec/zyz-kiosk
 Restart=always
 RestartSec=2

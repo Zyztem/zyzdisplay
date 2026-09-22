@@ -18,7 +18,7 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
     apt-get install -y \
-    cog curl iw network-manager alsa-utils libdrm-tests v4l-utils \
+    cog cage seatd curl iw network-manager alsa-utils libdrm-tests v4l-utils \
     python3 python3-yaml python3-evdev \
     python3-icalendar python3-dateutil \
     gstreamer1.0-tools gstreamer1.0-alsa \
@@ -27,7 +27,7 @@ apt-get update
     avahi-daemon uxplay bluez bluez-alsa-utils bluez-tools \
     mpv cd-discid libcdio-utils libdvdnav4 libdvdread8
 
-for cmd in miracle-wifid miracle-sinkctl go-librespot cog gst-launch-1.0 uxplay; do
+for cmd in miracle-wifid miracle-sinkctl go-librespot cog cage gst-launch-1.0 uxplay; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "ERROR: required command not found: $cmd" >&2
         exit 1
@@ -430,9 +430,10 @@ pkill -x uxplay 2>/dev/null || true
 fuser -k 8080/tcp >/dev/null 2>&1 || true
 
 systemctl daemon-reload
-systemctl enable bluetooth.service avahi-daemon.service zyzdisplay-dashboard.service zyzdisplay-kiosk.service go-librespot.service uxplay.service zyz-bluetooth.service miracle-wifid.service miracle-sink.service miracle-watch.service zyz-kiosk-escape.service
+systemctl enable bluetooth.service avahi-daemon.service seatd.service zyzdisplay-dashboard.service zyzdisplay-kiosk.service go-librespot.service uxplay.service zyz-bluetooth.service miracle-wifid.service miracle-sink.service miracle-watch.service zyz-kiosk-escape.service
 systemctl restart avahi-daemon.service >/dev/null 2>&1 || systemctl start avahi-daemon.service
 systemctl start bluetooth.service >/dev/null 2>&1 || true
+systemctl start seatd.service >/dev/null 2>&1 || true
 systemctl start zyzdisplay-dashboard.service go-librespot.service uxplay.service zyz-bluetooth.service miracle-wifid.service miracle-sink.service miracle-watch.service zyzdisplay-kiosk.service
 systemctl restart zyz-kiosk-escape.service >/dev/null 2>&1 || systemctl start zyz-kiosk-escape.service
 SERVICES_STOPPED=0

@@ -15,7 +15,8 @@ Common hardware:
 - MiracleCast
 - UxPlay (AirPlay)
 - go-librespot
-- Cog/WPE rendering directly to DRM/KMS
+- Cog/WPE rendering as a Wayland client under `cage`, a minimal wlroots-based
+  kiosk compositor (see [Display compositor](#display-compositor) below)
 
 ## Raspberry Pi 5 notes
 
@@ -59,6 +60,31 @@ provisioned, check for this symptom first before assuming a bad config: a
 raw `sudo iw dev <if> scan` finds the SSID, but `nmcli connection up` fails
 with `ssid-not-found`.
 
+## Display compositor
+
+Cog's own bare `--platform=drm` backend produced corrupted output on Pi 5's
+KMS driver (`Renderer 'modeset' does not support rotation 0 (0 degrees)` in
+the logs). `zyz-kiosk` now runs Cog as a Wayland client (`--platform=wl`)
+under `cage`, a minimal wlroots-based kiosk compositor: one fullscreen
+client, no decorations, and it exits (systemd restarts it) if Cog exits.
+wlroots' DRM backend is far more widely tested across hardware than Cog's own,
+which is what actually fixes the rendering. Pi 5 has the RAM to spare for it.
+
+Seat/device access goes through `seatd` rather than a full logind session
+(simpler than the PAM/TTY setup a general login-managed Wayland session
+needs): the Debian package's default unit runs `seatd -g video`, so anyone in
+the existing `video` group — `zyztem` already is — gets access automatically.
+No new groups or PAM config required.
+
+`cage -s` also allows real VT switching (Ctrl+Alt+F\<n\>) out of the
+compositor, as a second escape path alongside `zyz-kiosk-escape.service`
+below.
+
+Miracast/AirPlay are unaffected: they still fully stop
+`zyzdisplay-kiosk.service` (which tears down both `cage` and `cog` via
+`KillMode=control-group`) before grabbing DRM directly with `kmssink`, the
+same as before.
+
 ## Exiting to a terminal
 
 The kiosk owns DRM/KMS directly with no window manager, so there's normally no
@@ -83,11 +109,11 @@ At boot, systemd owns everything:
 4. `miracle-wifid.service` owns onboard Wi-Fi for Wi-Fi Direct.
 5. `miracle-sink.service` starts `miracle-sinkctl` and binds the sink on `wlan0`.
 6. `miracle-watch.service` keeps P2P scanning and the ZyzDisplay name alive after disconnects.
-7. `zyzdisplay-kiosk.service` shows the idle dashboard directly on DRM/KMS.
+7. `zyzdisplay-kiosk.service` shows the idle dashboard (Cog under `cage`).
 
 When a Miracast or AirPlay stream starts, the stack:
 
-- stops the Cog kiosk so DRM is free;
+- stops the kiosk (cage + Cog) so DRM is free;
 - stops go-librespot so HDMI ALSA is free;
 - plays video through `v4l2h264dec` into `kmssink`;
 - plays audio to the configured ALSA HDMI device;
