@@ -71,7 +71,6 @@ const state = {
   stateIcon: "",
   titleScrollGeneration: 0,
   titleTrackKey: "",
-  wallpaperParked: false,
   lastProgressSec: -1,
   lastProgressPct: -1,
   night: null,
@@ -238,18 +237,6 @@ function currentPositionMs() {
   return state.durationMs ? Math.min(value, state.durationMs) : value;
 }
 
-function ambientWashUrl(image) {
-  try {
-    const context = sampleContext();
-    sampleCanvas.width = 320;
-    sampleCanvas.height = 180;
-    context.drawImage(image, 0, 0, 320, 180);
-    return sampleCanvas.toDataURL("image/jpeg", 0.5);
-  } catch (_) {
-    return "";
-  }
-}
-
 function renderProgress() {
   if (!state.spotifyVisible) return;
   const pos = currentPositionMs();
@@ -292,45 +279,33 @@ function showIdle() {
   state.titleTrackKey = "";
   state.lastProgressSec = -1;
   state.lastProgressPct = -1;
-  document.body.classList.remove("is-spotify", "is-paused");
+  document.body.classList.remove("is-paused");
   const title = $("spotify-title");
   title.classList.remove("is-scrolling");
   title.style.removeProperty("--title-shift");
   title.style.removeProperty("--title-duration");
   title.style.transform = "";
   title.dataset.scrollReady = "0";
-  $("spotify-panel").classList.add("hidden");
-  $("spotify-ambient").classList.remove("active");
+  $("spotify-widget").classList.add("hidden");
   const eq = $("spotify-eq");
   if (eq) eq.classList.remove("is-on");
   clearSpotifyArt();
-  restoreWallpaper();
 }
 
 function showSpotify() {
-  if (state.spotifyVisible) {
-    if (state.artUrl) $("spotify-ambient").classList.add("active");
-    return;
-  }
+  if (state.spotifyVisible) return;
   state.spotifyVisible = true;
-  document.body.classList.add("is-spotify");
-  $("spotify-panel").classList.remove("hidden");
-  if (state.artUrl) $("spotify-ambient").classList.add("active");
-  parkWallpaper();
+  $("spotify-widget").classList.remove("hidden");
 }
 
 function clearSpotifyArt() {
   ["a", "b"].forEach((key) => {
     const image = $(`spotify-image-${key}`);
-    const ambient = $(`ambient-${key}`);
     image.classList.remove("active");
     image.removeAttribute("src");
     image.alt = "";
-    ambient.classList.remove("active");
-    ambient.style.backgroundImage = "";
   });
   $("spotify-placeholder").classList.remove("is-faded");
-  $("spotify-ambient").classList.remove("active");
   document.body.style.removeProperty("--dynamic-accent-dark");
   document.body.style.removeProperty("--dynamic-accent-light");
   state.artUrl = "";
@@ -341,17 +316,13 @@ function setSpotifyArt(url) {
     clearSpotifyArt();
     return;
   }
-  if (url === state.artUrl) {
-    if (state.spotifyVisible) $("spotify-ambient").classList.add("active");
-    return;
-  }
+  if (url === state.artUrl) return;
 
   const preload = new Image();
   preload.crossOrigin = "anonymous";
   preload.onload = () => {
     const nextKey = state.artFront === "a" ? "b" : "a";
     const prevKey = state.artFront;
-    const safeUrl = url.replaceAll('"', '\\"');
     const nextImg = $(`spotify-image-${nextKey}`);
     nextImg.src = url;
     nextImg.alt = "Album artwork";
@@ -359,13 +330,6 @@ function setSpotifyArt(url) {
     const prevImg = $(`spotify-image-${prevKey}`);
     prevImg.classList.remove("active");
     $("spotify-placeholder").classList.add("is-faded");
-    const nextAmbient = $(`ambient-${nextKey}`);
-    const wash = ambientWashUrl(preload);
-    nextAmbient.style.backgroundImage = `url("${(wash || safeUrl).replaceAll('"', '\\"')}")`;
-    nextAmbient.classList.add("active");
-    const prevAmbient = $(`ambient-${prevKey}`);
-    prevAmbient.classList.remove("active");
-    if (state.spotifyVisible) $("spotify-ambient").classList.add("active");
     state.artFront = nextKey;
     state.artUrl = url;
     applyArtworkAccent(preload);
@@ -373,7 +337,6 @@ function setSpotifyArt(url) {
       if (state.artFront !== nextKey) return;
       prevImg.removeAttribute("src");
       prevImg.alt = "";
-      prevAmbient.style.backgroundImage = "";
     }, 500);
   };
   preload.src = url;
@@ -425,15 +388,6 @@ function applySpotify(data) {
   }
   setScrollingTitle(track.name || "Unknown track", trackKey);
   setText($("spotify-artist"), (track.artist_names || []).join(", ") || "Unknown artist");
-  const album = track.album_name || "";
-  setText($("spotify-album"), album);
-  $("spotify-album").classList.toggle("is-empty", !album);
-  const volume = Number(data.volume ?? 0);
-  const steps = Number(data.volume_steps ?? 100) || 100;
-  const volumePct = Math.round(volume / steps * 100);
-  setText($("spotify-volume"), `${volumePct}%`);
-  const volumeFill = $("spotify-volume-fill");
-  if (volumeFill) volumeFill.style.transform = `scaleX(${Math.max(0, Math.min(1, volumePct / 100))})`;
   setSpotifyArt(track.album_cover_url || "");
 
   if (buffering) {
@@ -535,15 +489,12 @@ function applyWeather(data) {
   }
   setText($("weather-temp"), data.temp != null ? data.temp : "--");
   setText($("weather-desc"), data.desc || "");
-  setText($("footer-weather-temp"), data.temp != null ? data.temp : "--");
-  setText($("footer-weather-desc"), data.desc || "");
   const place = [data.location, data.region].filter(Boolean).join(", ");
   setText($("weather-place"), place || "Newberry");
   const high = data.high != null ? `H ${data.high}°` : "";
   const low = data.low != null ? `L ${data.low}°` : "";
   const range = [high, low].filter(Boolean).join("  ");
   setText($("weather-range"), range);
-  setText($("footer-weather-range"), range);
   const feels = data.feels != null && data.feels !== data.temp ? `Feels ${data.feels}°` : "";
   setText($("weather-feels"), feels);
   setText($("weather-alert"), data.alert || "");
@@ -567,7 +518,6 @@ function applyWeather(data) {
   if (data.sunset) extras.push(`↓ ${data.sunset}`);
   setText($("weather-extras"), extras.join(" · "));
   setWeatherIcon($("weather-icon"), data.icon || "sun");
-  setWeatherIcon($("footer-weather-icon"), data.icon || "sun");
   applyHourly(data.hourly);
   applyForecast(data.days);
   state.sunrise = data.sunrise || "";
@@ -653,31 +603,8 @@ function wallpaperReady(el, url) {
   return el && el.dataset.url === url && el.complete && el.naturalWidth > 0;
 }
 
-function parkWallpaper() {
-  if (state.wallpaperParked) return;
-  state.wallpaperParked = true;
-  ["a", "b"].forEach((key) => {
-    const el = wallpaperLayer(key);
-    if (!el) return;
-    el.classList.remove("active");
-    el.removeAttribute("src");
-    delete el.dataset.url;
-  });
-}
-
-function restoreWallpaper() {
-  const url = state.wallpaperUrl;
-  state.wallpaperParked = false;
-  if (url) {
-    state.wallpaperUrl = "";
-    showWallpaper(url, true);
-    return;
-  }
-  refreshWallpaper();
-}
-
 function showWallpaper(url, immediate = false) {
-  if (!url || state.spotifyVisible || url === state.wallpaperUrl) return;
+  if (!url || url === state.wallpaperUrl) return;
   const nextKey = hiddenWallpaperKey();
   const prevKey = state.wallpaperFront;
   const nextEl = setWallpaperLayer(nextKey, url);
@@ -710,7 +637,7 @@ function showWallpaper(url, immediate = false) {
 }
 
 function applyBackground(data) {
-  if (!data || state.spotifyVisible) return;
+  if (!data) return;
   const query = data.query ? String(data.query).replace(/\b\w/g, (char) => char.toUpperCase()) : "";
   setText($("wallpaper-credit"), ["Wallhaven", query, data.id].filter(Boolean).join(" · "));
   if (data.local) showWallpaper(data.local, !state.wallpaperUrl);
@@ -754,7 +681,6 @@ async function refreshSpotify() {
 }
 
 async function refreshWallpaper() {
-  if (state.spotifyVisible) return;
   try {
     const res = await fetch("/api/background", { cache: "no-store" });
     if (!res.ok) return;

@@ -5,16 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
   <title>ZyzDisplay</title>
-  <link rel="stylesheet" href="/dashboard.css?v=20260815g">
+  <link rel="stylesheet" href="/dashboard.css?v=20260922a">
 </head>
 <body>
   <div id="ambient" aria-hidden="true">
     <img id="wallpaper-a" class="wallpaper-layer" alt="" decoding="async">
     <img id="wallpaper-b" class="wallpaper-layer" alt="" decoding="async">
-    <div id="spotify-ambient">
-      <div id="ambient-a" class="ambient-layer"></div>
-      <div id="ambient-b" class="ambient-layer"></div>
-    </div>
     <div class="shade"></div>
     <div class="gradient"></div>
   </div>
@@ -41,79 +37,28 @@
         </section>
       </div>
 
-      <section id="weather-card" class="weather-card glass">
-        <div class="weather-now">
-          <svg id="weather-icon" class="icon weather-glyph" viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor" d="M361.5 1.2c5 2.1 8.6 6.6 9.6 11.9L391 121l107.9 19.8c5.3 1 9.8 4.6 11.9 9.6s1.5 10.7-1.6 15.2L446.9 256l62.3 90.3c3.1 4.5 3.7 10.2 1.6 15.2s-6.6 8.6-11.9 9.6L391 391 371.1 498.9c-1 5.3-4.6 9.8-9.6 11.9s-10.7 1.5-15.2-1.6L256 446.9l-90.3 62.3c-4.5 3.1-10.2 3.7-15.2 1.6s-8.6-6.6-9.6-11.9L121 391 13.1 371.1c-5.3-1-9.8-4.6-11.9-9.6s-1.5-10.7 1.6-15.2L65.1 256 2.8 165.7c-3.1-4.5-3.7-10.2-1.6-15.2s6.6-8.6 11.9-9.6L121 121 140.9 13.1c1-5.3 4.6-9.8 9.6-11.9s10.7-1.5 15.2 1.6L256 65.1 346.3 2.8c4.5-3.1 10.2-3.7 15.2-1.6zM160 256a96 96 0 1 1 192 0 96 96 0 1 1 -192 0zm224 0a128 128 0 1 0 -256 0 128 128 0 1 0 256 0z"></path></svg>
-          <div class="weather-copy">
-            <div id="weather-place" class="weather-place">Newberry</div>
-            <div class="weather-line">
-              <span id="weather-temp">--</span><span class="weather-deg">°</span>
+      <div class="weather-col">
+        <section id="spotify-widget" class="spotify-widget glass hidden">
+          <div class="spotify-widget-now">
+            <div class="spotify-widget-art">
+              <img id="spotify-image-a" class="album-layer" alt="" decoding="async">
+              <img id="spotify-image-b" class="album-layer" alt="" decoding="async">
+              <div id="spotify-placeholder" class="album-placeholder">
+                <svg class="spotify-mark" viewBox="0 0 496 512" aria-hidden="true"><path fill="currentColor" d="M248 8C111.1 8 0 119.1 0 256s111.1 248 248 248 248-111.1 248-248S384.9 8 248 8zm100.7 364.9c-4.2 0-6.8-1.3-10.7-3.6-62.4-37.6-135-39.2-206.7-24.5-3.9 1-9 2.6-11.9 2.6-9.7 0-15.8-7.7-15.8-15.8 0-10.3 6.1-15.2 13.6-16.8 81.9-18.1 165.6-16.5 237 26.2 6.1 3.9 9.7 7.4 9.7 16.5s-7.1 15.4-15.2 15.4zm26.9-65.6c-5.2 0-8.7-2.3-12.3-4.2-62.5-37-155.7-51.9-238.6-29.4-4.8 1.3-7.4 2.6-11.9 2.6-10.7 0-19.4-8.7-19.4-19.4s5.2-17.8 15.5-20.7c27.8-7.8 56.2-13.6 97.8-13.6 64.9 0 127.6 16.1 177 45.5 8.1 4.8 11.3 11 11.3 19.7-.1 10.8-8.5 19.5-19.4 19.5zm31-76.2c-5.2 0-8.4-1.3-12.9-3.9-71.2-42.5-198.5-52.7-280.9-29.7-3.6 1-8.1 2.6-12.9 2.6-13.2 0-23.3-10.3-23.3-23.6 0-13.6 8.4-21.3 17.4-23.9 35.2-10.3 74.6-15.2 117.5-15.2 73 0 149.5 15.2 205.4 47.8 7.8 4.5 12.9 10.7 12.9 22.6 0 13.6-11 23.3-23.2 23.3z"></path></svg>
+              </div>
             </div>
-            <div id="weather-desc" class="weather-desc"></div>
-            <div class="weather-range-row">
-              <span id="weather-range"></span>
-              <span id="weather-feels"></span>
+            <div class="spotify-widget-copy">
+              <div class="spotify-widget-kicker">
+                <span class="spotify-status">
+                  <span id="spotify-eq" class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <svg id="spotify-state-icon" class="icon" viewBox="0 0 384 512" aria-hidden="true"><path fill="currentColor" d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"></path></svg>
+                  <span id="spotify-state-label">Now Playing</span>
+                </span>
+              </div>
+              <div class="spotify-title-wrap"><span id="spotify-title">Song title</span></div>
+              <div id="spotify-artist" class="spotify-widget-artist">Artist</div>
             </div>
           </div>
-        </div>
-        <div id="weather-alert" class="weather-alert"></div>
-        <div id="hourly" class="hourly"></div>
-        <div id="weather-stats" class="weather-stats">
-          <div class="weather-stat">
-            <span class="weather-stat-label">Humidity</span>
-            <span id="weather-humidity"></span>
-          </div>
-          <div class="weather-stat">
-            <span class="weather-stat-label">Wind</span>
-            <span id="weather-wind"></span>
-          </div>
-          <div id="weather-uv-stat" class="weather-stat hidden">
-            <span class="weather-stat-label">UV</span>
-            <span id="weather-uv"></span>
-          </div>
-          <div id="weather-aqi-stat" class="weather-stat hidden">
-            <span class="weather-stat-label">AQI</span>
-            <span id="weather-aqi"></span>
-          </div>
-        </div>
-        <div id="forecast" class="forecast"></div>
-        <div id="weather-extras" class="weather-extras"></div>
-      </section>
-
-      <div class="brand">
-        <svg class="icon" viewBox="0 0 640 512" aria-hidden="true"><path fill="currentColor" d="M64 64V352H576V64H64zM0 64C0 28.7 28.7 0 64 0H576c35.3 0 64 28.7 64 64V352c0 35.3-28.7 64-64 64H64c-35.3 0-64-28.7-64-64V64zM128 448H512c17.7 0 32 14.3 32 32s-14.3 32-32 32H128c-17.7 0-32-14.3-32-32s14.3-32 32-32z"></path></svg>
-        <span>ZyzDisplay</span>
-      </div>
-    </header>
-
-    <section class="center">
-      <section id="spotify-panel" class="spotify-card glass hidden">
-        <div class="album-wrap">
-          <img id="spotify-image-a" class="album-layer" alt="" decoding="async">
-          <img id="spotify-image-b" class="album-layer" alt="" decoding="async">
-          <div id="spotify-placeholder" class="album-placeholder">
-            <svg class="spotify-mark" viewBox="0 0 496 512" aria-hidden="true"><path fill="currentColor" d="M248 8C111.1 8 0 119.1 0 256s111.1 248 248 248 248-111.1 248-248S384.9 8 248 8zm100.7 364.9c-4.2 0-6.8-1.3-10.7-3.6-62.4-37.6-135-39.2-206.7-24.5-3.9 1-9 2.6-11.9 2.6-9.7 0-15.8-7.7-15.8-15.8 0-10.3 6.1-15.2 13.6-16.8 81.9-18.1 165.6-16.5 237 26.2 6.1 3.9 9.7 7.4 9.7 16.5s-7.1 15.4-15.2 15.4zm26.9-65.6c-5.2 0-8.7-2.3-12.3-4.2-62.5-37-155.7-51.9-238.6-29.4-4.8 1.3-7.4 2.6-11.9 2.6-10.7 0-19.4-8.7-19.4-19.4s5.2-17.8 15.5-20.7c27.8-7.8 56.2-13.6 97.8-13.6 64.9 0 127.6 16.1 177 45.5 8.1 4.8 11.3 11 11.3 19.7-.1 10.8-8.5 19.5-19.4 19.5zm31-76.2c-5.2 0-8.4-1.3-12.9-3.9-71.2-42.5-198.5-52.7-280.9-29.7-3.6 1-8.1 2.6-12.9 2.6-13.2 0-23.3-10.3-23.3-23.6 0-13.6 8.4-21.3 17.4-23.9 35.2-10.3 74.6-15.2 117.5-15.2 73 0 149.5 15.2 205.4 47.8 7.8 4.5 12.9 10.7 12.9 22.6 0 13.6-11 23.3-23.2 23.3z"></path></svg>
-          </div>
-        </div>
-
-        <div class="spotify-copy">
-          <div class="spotify-kicker">
-            <span class="spotify-status">
-              <span id="spotify-eq" class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
-              <svg id="spotify-state-icon" class="icon" viewBox="0 0 384 512" aria-hidden="true"><path fill="currentColor" d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"></path></svg>
-              <span id="spotify-state-label">Now Playing</span>
-            </span>
-            <span class="spotify-volume">
-              <svg class="icon" viewBox="0 0 640 512" aria-hidden="true"><path fill="currentColor" d="M533.6 32.5C598.5 85.2 640 165.8 640 256s-41.5 170.7-106.4 223.5c-10.3 8.4-25.4 6.8-33.8-3.5s-6.8-25.4 3.5-33.8C557.5 398.2 592 331.2 592 256s-34.5-142.2-88.7-186.3c-10.3-8.4-11.8-23.5-3.5-33.8s23.5-11.8 33.8-3.5zM473.1 107c43.2 35.2 70.9 88.9 70.9 149s-27.7 113.8-70.9 149c-10.3 8.4-25.4 6.8-33.8-3.5s-6.8-25.4 3.5-33.8C475.3 341.3 496 301.1 496 256s-20.7-85.3-53.2-111.8c-10.3-8.4-11.8-23.5-3.5-33.8s23.5-11.8 33.8-3.5zm-60.5 74.5C434.1 199.1 448 225.9 448 256s-13.9 56.9-35.4 74.5c-10.3 8.4-25.4 6.8-33.8-3.5s-6.8-25.4 3.5-33.8C393.1 284.4 400 271 400 256s-6.9-28.4-17.7-37.3c-10.3-8.4-11.8-23.5-3.5-33.8s23.5-11.8 33.8-3.5zM301.1 34.8C312.6 40 320 51.4 320 64V448c0 12.6-7.4 24-18.9 29.2s-25 3.1-34.4-5.3L131.8 352H64c-35.3 0-64-28.7-64-64V224c0-35.3 28.7-64 64-64h67.8L266.7 40.1c9.4-8.4 22.9-10.4 34.4-5.3z"></path></svg>
-              <span class="volume-track"><span id="spotify-volume-fill"></span></span>
-              <span id="spotify-volume">75%</span>
-            </span>
-          </div>
-
-          <h2 class="spotify-title-wrap"><span id="spotify-title">Song title</span></h2>
-          <div id="spotify-artist" class="artist">Artist</div>
-          <div id="spotify-album" class="album">Album</div>
-
           <div class="progress-area">
             <div class="progress-track"><div id="spotify-progress" class="progress-fill"></div></div>
             <div class="progress-labels">
@@ -121,9 +66,53 @@
               <span id="spotify-duration">0:00</span>
             </div>
           </div>
-        </div>
-      </section>
-    </section>
+        </section>
+
+        <section id="weather-card" class="weather-card glass">
+          <div class="weather-now">
+            <svg id="weather-icon" class="icon weather-glyph" viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor" d="M361.5 1.2c5 2.1 8.6 6.6 9.6 11.9L391 121l107.9 19.8c5.3 1 9.8 4.6 11.9 9.6s1.5 10.7-1.6 15.2L446.9 256l62.3 90.3c3.1 4.5 3.7 10.2 1.6 15.2s-6.6 8.6-11.9 9.6L391 391 371.1 498.9c-1 5.3-4.6 9.8-9.6 11.9s-10.7 1.5-15.2-1.6L256 446.9l-90.3 62.3c-4.5 3.1-10.2 3.7-15.2 1.6s-8.6-6.6-9.6-11.9L121 391 13.1 371.1c-5.3-1-9.8-4.6-11.9-9.6s-1.5-10.7 1.6-15.2L65.1 256 2.8 165.7c-3.1-4.5-3.7-10.2-1.6-15.2s6.6-8.6 11.9-9.6L121 121 140.9 13.1c1-5.3 4.6-9.8 9.6-11.9s10.7-1.5 15.2 1.6L256 65.1 346.3 2.8c4.5-3.1 10.2-3.7 15.2-1.6zM160 256a96 96 0 1 1 192 0 96 96 0 1 1 -192 0zm224 0a128 128 0 1 0 -256 0 128 128 0 1 0 256 0z"></path></svg>
+            <div class="weather-copy">
+              <div id="weather-place" class="weather-place">Newberry</div>
+              <div class="weather-line">
+                <span id="weather-temp">--</span><span class="weather-deg">°</span>
+              </div>
+              <div id="weather-desc" class="weather-desc"></div>
+              <div class="weather-range-row">
+                <span id="weather-range"></span>
+                <span id="weather-feels"></span>
+              </div>
+            </div>
+          </div>
+          <div id="weather-alert" class="weather-alert"></div>
+          <div id="hourly" class="hourly"></div>
+          <div id="weather-stats" class="weather-stats">
+            <div class="weather-stat">
+              <span class="weather-stat-label">Humidity</span>
+              <span id="weather-humidity"></span>
+            </div>
+            <div class="weather-stat">
+              <span class="weather-stat-label">Wind</span>
+              <span id="weather-wind"></span>
+            </div>
+            <div id="weather-uv-stat" class="weather-stat hidden">
+              <span class="weather-stat-label">UV</span>
+              <span id="weather-uv"></span>
+            </div>
+            <div id="weather-aqi-stat" class="weather-stat hidden">
+              <span class="weather-stat-label">AQI</span>
+              <span id="weather-aqi"></span>
+            </div>
+          </div>
+          <div id="forecast" class="forecast"></div>
+          <div id="weather-extras" class="weather-extras"></div>
+        </section>
+      </div>
+
+      <div class="brand">
+        <svg class="icon" viewBox="0 0 640 512" aria-hidden="true"><path fill="currentColor" d="M64 64V352H576V64H64zM0 64C0 28.7 28.7 0 64 0H576c35.3 0 64 28.7 64 64V352c0 35.3-28.7 64-64 64H64c-35.3 0-64-28.7-64-64V64zM128 448H512c17.7 0 32 14.3 32 32s-14.3 32-32 32H128c-17.7 0-32-14.3-32-32s14.3-32 32-32z"></path></svg>
+        <span>ZyzDisplay</span>
+      </div>
+    </header>
 
     <footer class="footer glass">
       <div class="ready-row">
@@ -153,16 +142,6 @@
           <b class="status-dot" aria-hidden="true"></b>
         </span>
       </div>
-      <div id="footer-weather" class="weather">
-        <svg id="footer-weather-icon" class="icon weather-glyph" viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor" d="M361.5 1.2c5 2.1 8.6 6.6 9.6 11.9L391 121l107.9 19.8c5.3 1 9.8 4.6 11.9 9.6s1.5 10.7-1.6 15.2L446.9 256l62.3 90.3c3.1 4.5 3.7 10.2 1.6 15.2s-6.6 8.6-11.9 9.6L391 391 371.1 498.9c-1 5.3-4.6 9.8-9.6 11.9s-10.7 1.5-15.2-1.6L256 446.9l-90.3 62.3c-4.5 3.1-10.2 3.7-15.2 1.6s-8.6-6.6-9.6-11.9L121 391 13.1 371.1c-5.3-1-9.8-4.6-11.9-9.6s-1.5-10.7 1.6-15.2L65.1 256 2.8 165.7c-3.1-4.5-3.7-10.2-1.6-15.2s6.6-8.6 11.9-9.6L121 121 140.9 13.1c1-5.3 4.6-9.8 9.6-11.9s10.7-1.5 15.2 1.6L256 65.1 346.3 2.8c4.5-3.1 10.2-3.7 15.2-1.6zM160 256a96 96 0 1 1 192 0 96 96 0 1 1 -192 0zm224 0a128 128 0 1 0 -256 0 128 128 0 1 0 256 0z"></path></svg>
-        <div class="weather-copy">
-          <div class="weather-line">
-            <span id="footer-weather-temp">--</span><span class="weather-deg">°</span>
-            <span id="footer-weather-desc" class="weather-desc"></span>
-          </div>
-          <div class="weather-meta"><span id="footer-weather-range"></span></div>
-        </div>
-      </div>
       <div id="wallpaper-credit" class="wallpaper-credit"></div>
       <div class="network">
         <svg class="icon network-glyph" viewBox="0 0 640 512" aria-hidden="true"><path fill="currentColor" d="M54.2 202.9C123.2 136.7 216.8 96 320 96s196.8 40.7 265.8 106.9c12.8 12.2 33 11.8 45.2-.9s11.8-33-.9-45.2C549.7 79.5 440.4 32 320 32S90.3 79.5 9.8 156.7C-2.9 169-3.3 189.2 8.9 202s32.5 13.2 45.2 .9zM320 256c56.8 0 108.6 21.1 148.2 56c13.3 11.7 33.5 10.4 45.2-2.8s10.4-33.5-2.8-45.2C459.8 219.2 393 192 320 192s-139.8 27.2-190.5 72c-13.3 11.7-14.5 31.9-2.8 45.2s31.9 14.5 45.2 2.8c39.5-34.9 91.3-56 148.2-56zm64 160a64 64 0 1 0 -128 0 64 64 0 1 0 128 0z"></path></svg>
@@ -174,6 +153,6 @@
     </footer>
   </main>
 
-  <script src="/dashboard.js?v=20260815g"></script>
+  <script src="/dashboard.js?v=20260922a"></script>
 </body>
 </html>
