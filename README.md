@@ -9,7 +9,7 @@ Common hardware:
 
 - onboard `wlan0` dedicated to Miracast
 - USB Wi-Fi adapter for normal Wi-Fi (TP-Link Archer on the tested Pi 3 unit)
-- HDMI-A-1 at 1920x1080 (30Hz when the display offers it)
+- HDMI-A-1 at 1920x1080@60, force-applied to the compositor with `wlr-randr`
 - HDMI audio through ALSA, matched to whichever HDMI port is actually driving
   the display (`plughw:1,0` on the Pi 3 unit; Pi 5 has two HDMI ports/cards)
 - MiracleCast
@@ -79,6 +79,14 @@ No new groups or PAM config required.
 `cage -s` also allows real VT switching (Ctrl+Alt+F\<n\>) out of the
 compositor, as a second escape path alongside `zyz-kiosk-escape.service`
 below.
+
+wlroots picks whatever mode the display's EDID marks "preferred", which is
+not always the panel's native 1080p60 — cheap HDMI capture/scaler dongles in
+particular often report a lower mode (e.g. 720p60) as preferred instead.
+`zyz-kiosk` backgrounds `cage`, waits for its Wayland socket to appear, then
+runs `wlr-randr --output "$DRM_CONNECTOR_NAME" --mode "${DRM_MODE}Hz"` against
+it (cage implements `wlr-output-management-v1`, so this works without
+patching cage itself) before waiting on the compositor process.
 
 Miracast/AirPlay are unaffected: they still fully stop
 `zyzdisplay-kiosk.service` (which tears down both `cage` and `cog` via
@@ -223,12 +231,16 @@ sudo ./install.sh
 
 The installer automatically detects the connected HDMI DRM connector and tries
 to detect the HDMI ALSA card/device. The proven values remain the fallback.
-`DRM_MODE=1920x1080@30` prefers 1080p30; Cog falls back to 1080p60 if the
-display does not advertise a 30Hz mode.
+`zyz-kiosk` force-applies `DRM_MODE` to the `cage` compositor with `wlr-randr`
+once it starts (see [Display compositor](#display-compositor) below), so the
+kiosk always targets 1080p60 regardless of what the display's EDID marks
+"preferred" — cheap HDMI capture/scaler dongles in particular often default to
+something lower, like 720p60.
 
 ```text
 DRM_CONNECTOR_ID=35
-DRM_MODE=1920x1080@30
+DRM_CONNECTOR_NAME=HDMI-A-1
+DRM_MODE=1920x1080@60
 AUDIO_DEVICE=plughw:1,0
 ```
 
@@ -313,10 +325,15 @@ systemctl status \
   zyz-kiosk-escape \
   go-librespot \
   uxplay \
+  zyz-bluetooth \
+  zyz-disc \
   miracle-wifid \
   miracle-sink \
   miracle-watch
 ```
+
+`zyz-disc` is udev-activated (starts on optical media insert, see
+`udev/99-zyz-disc.rules`), so `inactive`/`dead` is its normal resting state.
 
 Logs:
 
@@ -325,6 +342,8 @@ journalctl -u zyzdisplay-dashboard -f
 journalctl -u zyzdisplay-kiosk -f
 journalctl -u go-librespot -f
 journalctl -u uxplay -f
+journalctl -u zyz-bluetooth -f
+journalctl -u zyz-disc -f
 journalctl -u miracle-wifid -f
 journalctl -u miracle-sink -f
 journalctl -u miracle-watch -f
@@ -338,6 +357,7 @@ sudo systemctl restart \
   zyzdisplay-dashboard \
   go-librespot \
   uxplay \
+  zyz-bluetooth \
   miracle-wifid \
   miracle-sink \
   miracle-watch \

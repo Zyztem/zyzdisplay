@@ -42,23 +42,26 @@ fi
 # sinkctl bind talks to wpa_supplicant through miracle-wifid.
 # Starting too early yields: "supplicant: invalid arguments (p2p_start_scan)".
 # MiracleCast keeps its control sockets under /run/miracle/wifi, not /run/wpa_supplicant.
-# P2P_FIND also needs the p2p-dev socket, which appears after the parent iface socket.
+# P2P_FIND needs the p2p-dev socket; that's the one bind actually talks to.
 CTRL_SOCK="/run/miracle/wifi/${MIRACAST_IFACE}"
 P2P_SOCK="/run/miracle/wifi/p2p-dev-${MIRACAST_IFACE}"
 for _ in $(seq 1 30); do
-    if [[ -S "$CTRL_SOCK" && -S "$P2P_SOCK" ]]; then
+    if [[ -S "$P2P_SOCK" ]]; then
         break
     fi
     sleep 1
 done
 
-if [[ ! -S "$CTRL_SOCK" ]]; then
-    echo "MiracleCast wpa_supplicant socket ${CTRL_SOCK} did not appear" >&2
-    exit 1
-fi
 if [[ ! -S "$P2P_SOCK" ]]; then
     echo "MiracleCast P2P socket ${P2P_SOCK} did not appear" >&2
     exit 1
+fi
+if [[ ! -S "$CTRL_SOCK" ]]; then
+    # Once wpa_supplicant's P2P-Device role has fully taken over the radio,
+    # this plain per-interface ctrl socket can disappear for good even
+    # though ${P2P_SOCK} (the one bind actually uses) stays up -- log it but
+    # don't block startup on a socket that may never come back.
+    echo "MiracleCast wpa_supplicant socket ${CTRL_SOCK} not present; continuing on P2P socket alone" >&2
 fi
 
 LINK_PATH=""

@@ -74,6 +74,18 @@ ensure_scan() {
     link_set P2PScanning b true || true
 }
 
+has_known_peer() {
+    # A peer object appears under /org/freedesktop/miracle/wifi/peer as soon
+    # as P2P-DEVICE-FOUND fires, and stays until it's lost/connects. Forcing
+    # a fresh P2P_FIND while one exists can collide with an in-flight
+    # provision-discovery/GO-negotiation action-frame exchange with that
+    # peer -- on this hardware that collision is what corrupts the driver's
+    # scan state and crashes wpa_supplicant mid-handshake (a stuck "Reject
+    # scan trigger" cycle right up until the connect attempt, then a HUP).
+    # Skip the idle rescan nudge whenever a peer is already known.
+    busctl --system tree org.freedesktop.miracle.wifi 2>/dev/null | grep -q '/peer/_'
+}
+
 remove_stale_groups() {
     local iface
     for iface in $(p2p_group_ifaces); do
@@ -170,7 +182,9 @@ while true; do
     if [[ "$idle_ticks" -ge 6 ]]; then
         idle_ticks=0
         ensure_name
-        ensure_scan
+        if ! has_known_peer; then
+            ensure_scan
+        fi
         cur="$(wpas_pid)"
         last="$(cat "$STATE" 2>/dev/null || true)"
         if [[ -n "$cur" && -n "$last" && "$cur" != "$last" ]]; then

@@ -18,7 +18,7 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
     apt-get install -y \
-    cog cage seatd curl iw network-manager alsa-utils libdrm-tests v4l-utils \
+    cog cage wlr-randr seatd curl iw network-manager alsa-utils libdrm-tests v4l-utils \
     python3 python3-yaml python3-evdev \
     python3-icalendar python3-dateutil \
     gstreamer1.0-tools gstreamer1.0-alsa \
@@ -27,7 +27,7 @@ apt-get update
     avahi-daemon uxplay bluez bluez-alsa-utils bluez-tools \
     mpv cd-discid libcdio-utils libdvdnav4 libdvdread8
 
-for cmd in miracle-wifid miracle-sinkctl go-librespot cog cage gst-launch-1.0 uxplay; do
+for cmd in miracle-wifid miracle-sinkctl go-librespot cog cage wlr-randr gst-launch-1.0 uxplay; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "ERROR: required command not found: $cmd" >&2
         exit 1
@@ -76,6 +76,51 @@ install -m 0755 "$SCRIPT_DIR/bin/zyz-bluetooth" /usr/local/libexec/zyz-bluetooth
 install -m 0755 "$SCRIPT_DIR/bin/zyz-disc" /usr/local/libexec/zyz-disc
 install -m 0755 "$SCRIPT_DIR/bin/zyz-kiosk-escape" /usr/local/libexec/zyz-kiosk-escape
 install -m 0755 "$SCRIPT_DIR/bin/zyz-health" /usr/local/bin/zyz-health
+
+# cage always draws a cursor for the seat's pointer even though nothing on a
+# touchscreen kiosk ever needs it. There's no compositor flag to disable
+# that, and cage hardcodes the xcursor theme name it asks for to "default"
+# rather than reading $XCURSOR_THEME, so the fix has to be a theme actually
+# named "default" -- placed under its own private XCURSOR_PATH root (set in
+# bin/zyz-kiosk) so it doesn't shadow the real /usr/share/icons/default used
+# by everything else. Its images are fully transparent 1x1 pixels, so the
+# pointer keeps moving but never actually draws anything.
+python3 - <<'PY'
+import os
+import struct
+
+dest = "/opt/zyzdisplay/cursor-theme/default"
+cursors_dir = os.path.join(dest, "cursors")
+os.makedirs(cursors_dir, exist_ok=True)
+
+MAGIC = b"Xcur"
+HEADER_SIZE = 16
+VERSION = 0x00010000
+IMAGE_TYPE = 0xfffd0002
+NOMINAL_SIZE = 24
+
+header = struct.pack("<4sIII", MAGIC, HEADER_SIZE, VERSION, 1)
+toc = struct.pack("<III", IMAGE_TYPE, NOMINAL_SIZE, HEADER_SIZE + 12)
+image_header = struct.pack("<IIIIIIIII", 36, IMAGE_TYPE, NOMINAL_SIZE, 1, 1, 1, 0, 0, 0)
+pixel = struct.pack("<I", 0)  # fully transparent ARGB32; Xcursor fields are little-endian
+
+blank_path = os.path.join(cursors_dir, "blank")
+with open(blank_path, "wb") as f:
+    f.write(header + toc + image_header + pixel)
+os.chmod(blank_path, 0o644)
+
+for name in (
+    "left_ptr", "default", "top_left_arrow", "arrow", "hand1", "hand2",
+    "pointer", "text", "xterm", "wait", "watch", "progress", "crosshair",
+):
+    link_path = os.path.join(cursors_dir, name)
+    if os.path.lexists(link_path):
+        os.remove(link_path)
+    os.symlink("blank", link_path)
+
+with open(os.path.join(dest, "index.theme"), "w") as f:
+    f.write("[Icon Theme]\nName=default\nComment=Fully transparent cursor for kiosk mode\n")
+PY
 
 usermod -aG video,render,audio "$ZYZ_USER" >/dev/null 2>&1 || true
 
@@ -139,7 +184,12 @@ if [[ ! -d "/sys/class/net/${NETWORK_IFACE}" || ! -d "/sys/class/net/${MIRACAST_
     exit 1
 fi
 
-DRM_MODE="${DRM_MODE:-1920x1080@30}"
+# Target mode for the cage/cog kiosk compositor. Cheap HDMI capture/scaler
+# EDIDs (e.g. the Macrosilicon-based dongles used for testing) often report a
+# lower resolution as "preferred", which wlroots picks by default, so this is
+# force-applied with wlr-randr once cage is up (see bin/zyz-kiosk) rather than
+# left to EDID autodetection.
+DRM_MODE="${DRM_MODE:-1920x1080@60}"
 
 DRM_CONNECTOR_ID="${DRM_CONNECTOR_ID:-}"
 DRM_CONNECTOR_NAME=""
@@ -147,6 +197,10 @@ if [[ -z "$DRM_CONNECTOR_ID" ]]; then
     read -r DRM_CONNECTOR_ID DRM_CONNECTOR_NAME < <(modetest -c 2>/dev/null | awk '$3 == "connected" && $4 ~ /^HDMI-A/ {print $1, $4; exit}') || true
 fi
 DRM_CONNECTOR_ID="${DRM_CONNECTOR_ID:-35}"
+if [[ -z "$DRM_CONNECTOR_NAME" ]]; then
+    DRM_CONNECTOR_NAME="$(modetest -c 2>/dev/null | awk -v id="$DRM_CONNECTOR_ID" '$1 == id {print $4; exit}')"
+fi
+DRM_CONNECTOR_NAME="${DRM_CONNECTOR_NAME:-HDMI-A-1}"
 
 # Raspberry Pi 5 has two HDMI ports (HDMI-A-1 / HDMI-A-2), each with its own
 # ALSA card (vc4-hdmi-0 / vc4-hdmi-1). HDMI audio only comes out of the port
@@ -200,6 +254,7 @@ NETWORK_IFACE=${NETWORK_IFACE}
 MIRACAST_IFACE=${MIRACAST_IFACE}
 DISPLAY_NAME=ZyzDisplay
 DRM_CONNECTOR_ID=${DRM_CONNECTOR_ID}
+DRM_CONNECTOR_NAME=${DRM_CONNECTOR_NAME}
 DRM_MODE=${DRM_MODE}
 AUDIO_DEVICE=${AUDIO_DEVICE}
 H264_DECODER=${H264_DECODER}

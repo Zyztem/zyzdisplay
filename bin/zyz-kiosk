@@ -19,7 +19,19 @@ done
 # what was producing corrupted output on Pi 5's KMS driver.
 # -s allows VT switching (Ctrl+Alt+F<n>) out of the compositor as a second,
 # independent escape path alongside zyz-kiosk-escape.service.
-exec /usr/bin/cage -s -- /usr/bin/cog --platform=wl --bg-color=black \
+# cage has no flag to hide the pointer, and it hardcodes both the xcursor
+# theme name (NULL, i.e. "default") and size in its own source rather than
+# reading XCURSOR_THEME/XCURSOR_SIZE -- so on this box it was resolving
+# "default" to the system's real Adwaita cursor via
+# /usr/share/icons/default -> /etc/alternatives/x-cursor-theme and drawing
+# a normal visible pointer. Only XCURSOR_PATH is actually honored (by
+# wlroots' own xcursor loader), and setting it replaces the whole search
+# path rather than extending it, so point it at a private directory that
+# contains nothing but a theme literally named "default" made of fully
+# transparent 1x1 cursor images (installed by install.sh). This leaves the
+# real /usr/share/icons/default alone for every other app on the system.
+export XCURSOR_PATH=/opt/zyzdisplay/cursor-theme
+/usr/bin/cage -s -- /usr/bin/cog --platform=wl --bg-color=black \
     --webprocess-failure=restart \
     --web-mem-limit=128 \
     --web-check-interval=20 \
@@ -39,4 +51,25 @@ exec /usr/bin/cage -s -- /usr/bin/cog --platform=wl --bg-color=black \
     --enable-html5-local-storage=false \
     --enable-offline-web-application-cache=false \
     --enable-dns-prefetching=false \
-    "$URL"
+    "$URL" &
+CAGE_PID=$!
+
+# wlroots defaults to whatever mode the display's EDID marks "preferred",
+# which on cheap HDMI capture/scaler dongles is often a low-res fallback
+# (e.g. 720p60) rather than the panel's native 1080p60. cage implements
+# wlr-output-management-v1, so force the real target mode with wlr-randr
+# once its Wayland socket exists instead of patching cage itself.
+(
+    for _ in $(seq 1 50); do
+        sock="$(compgen -G "${XDG_RUNTIME_DIR}/wayland-[0-9]*" 2>/dev/null | grep -v '\.lock$' | head -n1)" || true
+        [[ -n "$sock" ]] && break
+        sleep 0.1
+    done
+    if [[ -n "${sock:-}" ]]; then
+        WAYLAND_DISPLAY="$(basename "$sock")" wlr-randr \
+            --output "${DRM_CONNECTOR_NAME:-HDMI-A-1}" \
+            --mode "${DRM_MODE:-1920x1080@60}Hz" >/dev/null 2>&1 || true
+    fi
+) &
+
+wait "$CAGE_PID"
